@@ -937,6 +937,239 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Resource constants and limits
+MEMORY_SAFETY_MARGIN=20  # Reserve 20% of total memory
+CPU_SAFETY_MARGIN=25     # Reserve 25% of total CPU
+MIN_MEMORY_PER_APP=512   # Minimum MB per app
+MAX_MEMORY_PER_APP=2048  # Maximum MB per app
+MIN_CPU_PER_APP=0.5      # Minimum CPU cores per app
+THREAD_MEMORY_USAGE=80   # Average MB per thread
+MAX_APPS_PER_SERVER=10   # Hard limit for apps per server
+
+# Function to get current system resources
+get_system_resources() {
+    local total_memory_mb=$(free -m | awk 'NR==2{print $2}')
+    local available_memory_mb=$(free -m | awk 'NR==2{print $7}')
+    local total_cpu_cores=$(nproc)
+    local cpu_usage=$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1}')
+
+    # Calculate usable resources (after safety margins)
+    local usable_memory_mb=$(($total_memory_mb * (100 - $MEMORY_SAFETY_MARGIN) / 100))
+    local usable_cpu_cores=$(echo "$total_cpu_cores * (100 - $CPU_SAFETY_MARGIN) / 100" | bc -l)
+
+    echo "$total_memory_mb $available_memory_mb $total_cpu_cores $cpu_usage $usable_memory_mb $usable_cpu_cores"
+}
+
+# Function to count existing apps and their resource usage
+get_app_resource_usage() {
+    local total_apps=0
+    local total_threads=0
+    local total_memory_used=0
+    local total_instances=0
+
+    # Count main apps
+    for config in /etc/laravel-apps/*.conf; do
+        if [ -f "$config" ]; then
+            source "$config"
+            total_apps=$((total_apps + 1))
+
+            # Count threads from Caddyfile if exists
+            if [ -f "$APP_DIR/Caddyfile" ]; then
+                local app_threads=$(grep -oP 'num_threads \K\d+' "$APP_DIR/Caddyfile" 2>/dev/null || echo "2")
+                total_threads=$((total_threads + app_threads))
+                total_memory_used=$((total_memory_used + (app_threads * THREAD_MEMORY_USAGE)))
+            fi
+
+            # Count scaled instances
+            for service in /etc/systemd/system/frankenphp-$APP_NAME-*.service; do
+                if [ -f "$service" ]; then
+                    total_instances=$((total_instances + 1))
+                    total_threads=$((total_threads + app_threads))
+                    total_memory_used=$((total_memory_used + (app_threads * THREAD_MEMORY_USAGE)))
+                fi
+            done
+        fi
+    done
+
+    echo "$total_apps $total_threads $total_memory_used $total_instances"
+}
+
+# Smart thread allocation based on total apps
+calculate_smart_threads() {
+    local base_threads=$1
+    local existing_apps=$2
+    local total_memory_mb=$3
+    local available_memory_mb=$4
+    local total_cpu_cores=$5
+
+    # Base allocation
+    local smart_threads=$base_threads
+
+    # Reduce threads based on number of existing apps
+    if [ $existing_apps -gt 0 ]; then
+        # Calculate resource per app
+        local memory_per_app=$(($total_memory_mb / ($existing_apps + 1)))
+        local cpu_per_app=$(echo "$total_cpu_cores / ($existing_apps + 1)" | bc -l)
+
+        # Adjust threads based on memory constraint
+        local max_threads_by_memory=$(($memory_per_app / $THREAD_MEMORY_USAGE))
+        if [ $max_threads_by_memory -lt $smart_threads ]; then
+            smart_threads=$max_threads_by_memory
+        fi
+
+        # Adjust threads based on CPU constraint
+        local max_threads_by_cpu=$(echo "$cpu_per_app * 2" | bc -l | cut -d'.' -f1)
+        if [ $max_threads_by_cpu -lt $smart_threads ]; then
+            smart_threads=$max_threads_by_cpu
+        fi
+
+        # Apply scaling factor based on app count
+        if [ $existing_apps -ge 5 ]; then
+            smart_threads=$((smart_threads * 70 / 100))  # 30% reduction for 5+ apps
+        elif [ $existing_apps -ge 3 ]; then
+            smart_threads=$((smart_threads * 80 / 100))  # 20% reduction for 3-4 apps
+        elif [ $existing_apps -ge 1 ]; then
+            smart_threads=$((smart_threads * 90 / 100))  # 10% reduction for 1-2 apps
+        fi
+    fi
+
+    # Ensure minimum viable threads
+    if [ $smart_threads -lt 2 ]; then
+        smart_threads=2
+    fi
+
+    echo $smart_threads
+}
+
+# Pre-flight resource check
+preflight_resource_check() {
+    local app_name=$1
+    local github_repo=$2
+
+    log_info "🔍 Running pre-flight resource check for $app_name..."
+
+    # Get current system resources
+    local resources=($(get_system_resources))
+    local total_memory_mb=${resources[0]}
+    local available_memory_mb=${resources[1]}
+    local total_cpu_cores=${resources[2]}
+    local cpu_usage=${resources[3]}
+    local usable_memory_mb=${resources[4]}
+    local usable_cpu_cores=${resources[5]}
+
+    # Get current app usage
+    local usage=($(get_app_resource_usage))
+    local existing_apps=${usage[0]}
+    local total_threads=${usage[1]}
+    local total_memory_used=${usage[2]}
+    local total_instances=${usage[3]}
+
+    # Check hard limits
+    if [ $existing_apps -ge $MAX_APPS_PER_SERVER ]; then
+        log_error "❌ Hard limit reached: Maximum $MAX_APPS_PER_SERVER apps per server"
+        log_error "   Current apps: $existing_apps"
+        log_error "   Please scale horizontally or remove unused apps"
+        return 1
+    fi
+
+    # Check memory availability
+    local estimated_memory_needed=$(($MIN_MEMORY_PER_APP))
+    if [ $available_memory_mb -lt $estimated_memory_needed ]; then
+        log_error "❌ Insufficient memory available"
+        log_error "   Available: ${available_memory_mb}MB"
+        log_error "   Required: ${estimated_memory_needed}MB"
+        log_error "   Currently used: ${total_memory_used}MB"
+        return 1
+    fi
+
+    # Check CPU availability
+    local cpu_usage_int=$(echo "$cpu_usage" | cut -d'.' -f1)
+    if [ $cpu_usage_int -gt 80 ]; then
+        log_error "❌ High CPU usage detected: ${cpu_usage}%"
+        log_error "   Please wait for CPU usage to decrease before creating new apps"
+        return 1
+    fi
+
+    # Calculate smart threads for new app
+    local smart_threads=$(calculate_smart_threads $(calculate_optimal_threads) $existing_apps $total_memory_mb $available_memory_mb $total_cpu_cores)
+
+    # Warning system
+    local memory_usage_percent=$(($total_memory_used * 100 / $total_memory_mb))
+    local projected_memory_usage=$(($total_memory_used + ($smart_threads * $THREAD_MEMORY_USAGE)))
+    local projected_memory_percent=$(($projected_memory_usage * 100 / $total_memory_mb))
+
+    # Memory warnings
+    if [ $projected_memory_percent -gt 80 ]; then
+        log_warning "⚠️  High memory usage projected: ${projected_memory_percent}%"
+        log_warning "   Consider reducing thread count or scaling horizontally"
+    elif [ $projected_memory_percent -gt 70 ]; then
+        log_warning "⚠️  Moderate memory usage projected: ${projected_memory_percent}%"
+    fi
+
+    # App count warnings
+    if [ $existing_apps -ge 7 ]; then
+        log_warning "⚠️  High app count: $existing_apps apps"
+        log_warning "   Consider consolidating or scaling horizontally"
+    elif [ $existing_apps -ge 5 ]; then
+        log_warning "⚠️  Moderate app count: $existing_apps apps"
+    fi
+
+    # Success - display resource allocation
+    log_info "✅ Pre-flight check passed!"
+    log_info "📊 Resource allocation for $app_name:"
+    log_info "   🧵 Threads: $smart_threads (optimized for $existing_apps existing apps)"
+    log_info "   💾 Memory: ~$(($smart_threads * $THREAD_MEMORY_USAGE))MB"
+    log_info "   📈 Projected total memory usage: ${projected_memory_percent}%"
+    log_info "   🏗️  Total apps after creation: $((existing_apps + 1))"
+
+    # Store smart threads for later use
+    export SMART_THREADS=$smart_threads
+    return 0
+}
+
+# Function to calculate optimal FrankenPHP thread count
+calculate_optimal_threads() {
+    local cpu_cores=$(nproc)
+    local available_memory_gb=$(free -g | awk 'NR==2{print $7}')
+    local optimal_threads
+
+    # Base calculation: Start with CPU cores
+    if [ $cpu_cores -eq 1 ]; then
+        # Single core: Use 2 threads to avoid blocking
+        optimal_threads=2
+    elif [ $cpu_cores -eq 2 ]; then
+        # Dual core: Use 3 threads (1.5x cores)
+        optimal_threads=3
+    elif [ $cpu_cores -le 4 ]; then
+        # Quad core or less: Use cores + 1
+        optimal_threads=$((cpu_cores + 1))
+    elif [ $cpu_cores -le 8 ]; then
+        # 6-8 cores: Use cores + 2
+        optimal_threads=$((cpu_cores + 2))
+    else
+        # High core count: Use 75% of cores + 4 (to avoid overloading)
+        optimal_threads=$(((cpu_cores * 3 / 4) + 4))
+    fi
+
+    # Memory constraint check (each thread can use ~50-100MB)
+    # Conservative estimate: 80MB per thread
+    local max_threads_by_memory=$((available_memory_gb * 1024 / 80))
+
+    # Use the lower of CPU-based or memory-based calculation
+    if [ $max_threads_by_memory -lt $optimal_threads ]; then
+        optimal_threads=$max_threads_by_memory
+    fi
+
+    # Ensure minimum of 2 threads and maximum of 32 threads
+    if [ $optimal_threads -lt 2 ]; then
+        optimal_threads=2
+    elif [ $optimal_threads -gt 32 ]; then
+        optimal_threads=32
+    fi
+
+    echo $optimal_threads
+}
+
 # Import validation functions from main script
 source /usr/local/bin/frankenphp-multiapp-deployer.sh 2>/dev/null || true
 
@@ -1751,6 +1984,153 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Resource constants and limits
+MEMORY_SAFETY_MARGIN=20  # Reserve 20% of total memory
+CPU_SAFETY_MARGIN=25     # Reserve 25% of total CPU
+MIN_MEMORY_PER_APP=512   # Minimum MB per app
+MAX_MEMORY_PER_APP=2048  # Maximum MB per app
+MIN_CPU_PER_APP=0.5      # Minimum CPU cores per app
+THREAD_MEMORY_USAGE=80   # Average MB per thread
+MAX_APPS_PER_SERVER=10   # Hard limit for apps per server
+
+# Function to get current system resources
+get_system_resources() {
+    local total_memory_mb=$(free -m | awk 'NR==2{print $2}')
+    local available_memory_mb=$(free -m | awk 'NR==2{print $7}')
+    local total_cpu_cores=$(nproc)
+    local cpu_usage=$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1}')
+
+    # Calculate usable resources (after safety margins)
+    local usable_memory_mb=$(($total_memory_mb * (100 - $MEMORY_SAFETY_MARGIN) / 100))
+    local usable_cpu_cores=$(echo "$total_cpu_cores * (100 - $CPU_SAFETY_MARGIN) / 100" | bc -l)
+
+    echo "$total_memory_mb $available_memory_mb $total_cpu_cores $cpu_usage $usable_memory_mb $usable_cpu_cores"
+}
+
+# Function to count existing apps and their resource usage
+get_app_resource_usage() {
+    local total_apps=0
+    local total_threads=0
+    local total_memory_used=0
+    local total_instances=0
+
+    # Count main apps
+    for config in /etc/laravel-apps/*.conf; do
+        if [ -f "$config" ]; then
+            source "$config"
+            total_apps=$((total_apps + 1))
+
+            # Count threads from Caddyfile if exists
+            if [ -f "$APP_DIR/Caddyfile" ]; then
+                local app_threads=$(grep -oP 'num_threads \K\d+' "$APP_DIR/Caddyfile" 2>/dev/null || echo "2")
+                total_threads=$((total_threads + app_threads))
+                total_memory_used=$((total_memory_used + (app_threads * THREAD_MEMORY_USAGE)))
+            fi
+
+            # Count scaled instances
+            for service in /etc/systemd/system/frankenphp-$APP_NAME-*.service; do
+                if [ -f "$service" ]; then
+                    total_instances=$((total_instances + 1))
+                    total_threads=$((total_threads + app_threads))
+                    total_memory_used=$((total_memory_used + (app_threads * THREAD_MEMORY_USAGE)))
+                fi
+            done
+        fi
+    done
+
+    echo "$total_apps $total_threads $total_memory_used $total_instances"
+}
+
+# Smart thread allocation based on total apps
+calculate_smart_threads() {
+    local base_threads=$1
+    local existing_apps=$2
+    local total_memory_mb=$3
+    local available_memory_mb=$4
+    local total_cpu_cores=$5
+
+    # Base allocation
+    local smart_threads=$base_threads
+
+    # Reduce threads based on number of existing apps
+    if [ $existing_apps -gt 0 ]; then
+        # Calculate resource per app
+        local memory_per_app=$(($total_memory_mb / ($existing_apps + 1)))
+        local cpu_per_app=$(echo "$total_cpu_cores / ($existing_apps + 1)" | bc -l)
+
+        # Adjust threads based on memory constraint
+        local max_threads_by_memory=$(($memory_per_app / $THREAD_MEMORY_USAGE))
+        if [ $max_threads_by_memory -lt $smart_threads ]; then
+            smart_threads=$max_threads_by_memory
+        fi
+
+        # Adjust threads based on CPU constraint
+        local max_threads_by_cpu=$(echo "$cpu_per_app * 2" | bc -l | cut -d'.' -f1)
+        if [ $max_threads_by_cpu -lt $smart_threads ]; then
+            smart_threads=$max_threads_by_cpu
+        fi
+
+        # Apply scaling factor based on app count
+        if [ $existing_apps -ge 5 ]; then
+            smart_threads=$((smart_threads * 70 / 100))  # 30% reduction for 5+ apps
+        elif [ $existing_apps -ge 3 ]; then
+            smart_threads=$((smart_threads * 80 / 100))  # 20% reduction for 3-4 apps
+        elif [ $existing_apps -ge 1 ]; then
+            smart_threads=$((smart_threads * 90 / 100))  # 10% reduction for 1-2 apps
+        fi
+    fi
+
+    # Ensure minimum viable threads
+    if [ $smart_threads -lt 2 ]; then
+        smart_threads=2
+    fi
+
+    echo $smart_threads
+}
+
+# Function to calculate optimal FrankenPHP thread count
+calculate_optimal_threads() {
+    local cpu_cores=$(nproc)
+    local available_memory_gb=$(free -g | awk 'NR==2{print $7}')
+    local optimal_threads
+
+    # Base calculation: Start with CPU cores
+    if [ $cpu_cores -eq 1 ]; then
+        # Single core: Use 2 threads to avoid blocking
+        optimal_threads=2
+    elif [ $cpu_cores -eq 2 ]; then
+        # Dual core: Use 3 threads (1.5x cores)
+        optimal_threads=3
+    elif [ $cpu_cores -le 4 ]; then
+        # Quad core or less: Use cores + 1
+        optimal_threads=$((cpu_cores + 1))
+    elif [ $cpu_cores -le 8 ]; then
+        # 6-8 cores: Use cores + 2
+        optimal_threads=$((cpu_cores + 2))
+    else
+        # High core count: Use 75% of cores + 4 (to avoid overloading)
+        optimal_threads=$(((cpu_cores * 3 / 4) + 4))
+    fi
+
+    # Memory constraint check (each thread can use ~50-100MB)
+    # Conservative estimate: 80MB per thread
+    local max_threads_by_memory=$((available_memory_gb * 1024 / 80))
+
+    # Use the lower of CPU-based or memory-based calculation
+    if [ $max_threads_by_memory -lt $optimal_threads ]; then
+        optimal_threads=$max_threads_by_memory
+    fi
+
+    # Ensure minimum of 2 threads and maximum of 32 threads
+    if [ $optimal_threads -lt 2 ]; then
+        optimal_threads=2
+    elif [ $optimal_threads -gt 32 ]; then
+        optimal_threads=32
+    fi
+
+    echo $optimal_threads
+}
+
 # Validate port function
 validate_port() {
     local port="$1"
@@ -2233,6 +2613,63 @@ log_header() {
     echo -e "${BLUE}$1${NC}"
 }
 
+# Resource constants and limits
+MEMORY_SAFETY_MARGIN=20  # Reserve 20% of total memory
+CPU_SAFETY_MARGIN=25     # Reserve 25% of total CPU
+MIN_MEMORY_PER_APP=512   # Minimum MB per app
+MAX_MEMORY_PER_APP=2048  # Maximum MB per app
+MIN_CPU_PER_APP=0.5      # Minimum CPU cores per app
+THREAD_MEMORY_USAGE=80   # Average MB per thread
+MAX_APPS_PER_SERVER=10   # Hard limit for apps per server
+
+# Function to get current system resources
+get_system_resources() {
+    local total_memory_mb=$(free -m | awk 'NR==2{print $2}')
+    local available_memory_mb=$(free -m | awk 'NR==2{print $7}')
+    local total_cpu_cores=$(nproc)
+    local cpu_usage=$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1}')
+
+    # Calculate usable resources (after safety margins)
+    local usable_memory_mb=$(($total_memory_mb * (100 - $MEMORY_SAFETY_MARGIN) / 100))
+    local usable_cpu_cores=$(echo "$total_cpu_cores * (100 - $CPU_SAFETY_MARGIN) / 100" | bc -l)
+
+    echo "$total_memory_mb $available_memory_mb $total_cpu_cores $cpu_usage $usable_memory_mb $usable_cpu_cores"
+}
+
+# Function to count existing apps and their resource usage
+get_app_resource_usage() {
+    local total_apps=0
+    local total_threads=0
+    local total_memory_used=0
+    local total_instances=0
+
+    # Count main apps
+    for config in /etc/laravel-apps/*.conf; do
+        if [ -f "$config" ]; then
+            source "$config"
+            total_apps=$((total_apps + 1))
+
+            # Count threads from Caddyfile if exists
+            if [ -f "$APP_DIR/Caddyfile" ]; then
+                local app_threads=$(grep -oP 'num_threads \K\d+' "$APP_DIR/Caddyfile" 2>/dev/null || echo "2")
+                total_threads=$((total_threads + app_threads))
+                total_memory_used=$((total_memory_used + (app_threads * THREAD_MEMORY_USAGE)))
+            fi
+
+            # Count scaled instances
+            for service in /etc/systemd/system/frankenphp-$APP_NAME-*.service; do
+                if [ -f "$service" ]; then
+                    total_instances=$((total_instances + 1))
+                    total_threads=$((total_threads + app_threads))
+                    total_memory_used=$((total_memory_used + (app_threads * THREAD_MEMORY_USAGE)))
+                fi
+            done
+        fi
+    done
+
+    echo "$total_apps $total_threads $total_memory_used $total_instances"
+}
+
 # Get system resources
 resources=($(get_system_resources))
 total_memory_mb=${resources[0]}
@@ -2391,6 +2828,15 @@ log_header() {
     echo -e "${BLUE}$1${NC}"
 }
 
+# Resource constants and limits
+MEMORY_SAFETY_MARGIN=20  # Reserve 20% of total memory
+CPU_SAFETY_MARGIN=25     # Reserve 25% of total CPU
+MIN_MEMORY_PER_APP=512   # Minimum MB per app
+MAX_MEMORY_PER_APP=2048  # Maximum MB per app
+MIN_CPU_PER_APP=0.5      # Minimum CPU cores per app
+THREAD_MEMORY_USAGE=80   # Average MB per thread
+MAX_APPS_PER_SERVER=10   # Hard limit for apps per server
+
 echo ""
 log_header "📱 DETAILED APP RESOURCE ANALYSIS"
 log_header "=================================="
@@ -2500,6 +2946,110 @@ NC='\033[0m'
 
 log_header() {
     echo -e "${BLUE}$1${NC}"
+}
+
+# Resource constants and limits
+MEMORY_SAFETY_MARGIN=20  # Reserve 20% of total memory
+CPU_SAFETY_MARGIN=25     # Reserve 25% of total CPU
+MIN_MEMORY_PER_APP=512   # Minimum MB per app
+MAX_MEMORY_PER_APP=2048  # Maximum MB per app
+MIN_CPU_PER_APP=0.5      # Minimum CPU cores per app
+THREAD_MEMORY_USAGE=80   # Average MB per thread
+MAX_APPS_PER_SERVER=10   # Hard limit for apps per server
+
+# Function to get current system resources
+get_system_resources() {
+    local total_memory_mb=$(free -m | awk 'NR==2{print $2}')
+    local available_memory_mb=$(free -m | awk 'NR==2{print $7}')
+    local total_cpu_cores=$(nproc)
+    local cpu_usage=$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1}')
+
+    # Calculate usable resources (after safety margins)
+    local usable_memory_mb=$(($total_memory_mb * (100 - $MEMORY_SAFETY_MARGIN) / 100))
+    local usable_cpu_cores=$(echo "$total_cpu_cores * (100 - $CPU_SAFETY_MARGIN) / 100" | bc -l)
+
+    echo "$total_memory_mb $available_memory_mb $total_cpu_cores $cpu_usage $usable_memory_mb $usable_cpu_cores"
+}
+
+# Function to count existing apps and their resource usage
+get_app_resource_usage() {
+    local total_apps=0
+    local total_threads=0
+    local total_memory_used=0
+    local total_instances=0
+
+    # Count main apps
+    for config in /etc/laravel-apps/*.conf; do
+        if [ -f "$config" ]; then
+            source "$config"
+            total_apps=$((total_apps + 1))
+
+            # Count threads from Caddyfile if exists
+            if [ -f "$APP_DIR/Caddyfile" ]; then
+                local app_threads=$(grep -oP 'num_threads \K\d+' "$APP_DIR/Caddyfile" 2>/dev/null || echo "2")
+                total_threads=$((total_threads + app_threads))
+                total_memory_used=$((total_memory_used + (app_threads * THREAD_MEMORY_USAGE)))
+            fi
+
+            # Count scaled instances
+            for service in /etc/systemd/system/frankenphp-$APP_NAME-*.service; do
+                if [ -f "$service" ]; then
+                    total_instances=$((total_instances + 1))
+                    total_threads=$((total_threads + app_threads))
+                    total_memory_used=$((total_memory_used + (app_threads * THREAD_MEMORY_USAGE)))
+                fi
+            done
+        fi
+    done
+
+    echo "$total_apps $total_threads $total_memory_used $total_instances"
+}
+
+# Smart thread allocation based on total apps
+calculate_smart_threads() {
+    local base_threads=$1
+    local existing_apps=$2
+    local total_memory_mb=$3
+    local available_memory_mb=$4
+    local total_cpu_cores=$5
+
+    # Base allocation
+    local smart_threads=$base_threads
+
+    # Reduce threads based on number of existing apps
+    if [ $existing_apps -gt 0 ]; then
+        # Calculate resource per app
+        local memory_per_app=$(($total_memory_mb / ($existing_apps + 1)))
+        local cpu_per_app=$(echo "$total_cpu_cores / ($existing_apps + 1)" | bc -l)
+
+        # Adjust threads based on memory constraint
+        local max_threads_by_memory=$(($memory_per_app / $THREAD_MEMORY_USAGE))
+        if [ $max_threads_by_memory -lt $smart_threads ]; then
+            smart_threads=$max_threads_by_memory
+        fi
+
+        # Adjust threads based on CPU constraint
+        local max_threads_by_cpu=$(echo "$cpu_per_app * 2" | bc -l | cut -d'.' -f1)
+        if [ $max_threads_by_cpu -lt $smart_threads ]; then
+            smart_threads=$max_threads_by_cpu
+        fi
+
+        # Apply scaling factor based on app count
+        if [ $existing_apps -ge 5 ]; then
+            smart_threads=$((smart_threads * 70 / 100))  # 30% reduction for 5+ apps
+        elif [ $existing_apps -ge 3 ]; then
+            smart_threads=$((smart_threads * 80 / 100))  # 20% reduction for 3-4 apps
+        elif [ $existing_apps -ge 1 ]; then
+            smart_threads=$((smart_threads * 90 / 100))  # 10% reduction for 1-2 apps
+        fi
+    fi
+
+    # Ensure minimum viable threads
+    if [ $smart_threads -lt 2 ]; then
+        smart_threads=2
+    fi
+
+    echo $smart_threads
 }
 
 # Get current resources
@@ -2708,6 +3258,153 @@ log_error() {
 
 log_header() {
     echo -e "${BLUE}$1${NC}"
+}
+
+# Resource constants and limits
+MEMORY_SAFETY_MARGIN=20  # Reserve 20% of total memory
+CPU_SAFETY_MARGIN=25     # Reserve 25% of total CPU
+MIN_MEMORY_PER_APP=512   # Minimum MB per app
+MAX_MEMORY_PER_APP=2048  # Maximum MB per app
+MIN_CPU_PER_APP=0.5      # Minimum CPU cores per app
+THREAD_MEMORY_USAGE=80   # Average MB per thread
+MAX_APPS_PER_SERVER=10   # Hard limit for apps per server
+
+# Function to get current system resources
+get_system_resources() {
+    local total_memory_mb=$(free -m | awk 'NR==2{print $2}')
+    local available_memory_mb=$(free -m | awk 'NR==2{print $7}')
+    local total_cpu_cores=$(nproc)
+    local cpu_usage=$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1}')
+
+    # Calculate usable resources (after safety margins)
+    local usable_memory_mb=$(($total_memory_mb * (100 - $MEMORY_SAFETY_MARGIN) / 100))
+    local usable_cpu_cores=$(echo "$total_cpu_cores * (100 - $CPU_SAFETY_MARGIN) / 100" | bc -l)
+
+    echo "$total_memory_mb $available_memory_mb $total_cpu_cores $cpu_usage $usable_memory_mb $usable_cpu_cores"
+}
+
+# Function to count existing apps and their resource usage
+get_app_resource_usage() {
+    local total_apps=0
+    local total_threads=0
+    local total_memory_used=0
+    local total_instances=0
+
+    # Count main apps
+    for config in /etc/laravel-apps/*.conf; do
+        if [ -f "$config" ]; then
+            source "$config"
+            total_apps=$((total_apps + 1))
+
+            # Count threads from Caddyfile if exists
+            if [ -f "$APP_DIR/Caddyfile" ]; then
+                local app_threads=$(grep -oP 'num_threads \K\d+' "$APP_DIR/Caddyfile" 2>/dev/null || echo "2")
+                total_threads=$((total_threads + app_threads))
+                total_memory_used=$((total_memory_used + (app_threads * THREAD_MEMORY_USAGE)))
+            fi
+
+            # Count scaled instances
+            for service in /etc/systemd/system/frankenphp-$APP_NAME-*.service; do
+                if [ -f "$service" ]; then
+                    total_instances=$((total_instances + 1))
+                    total_threads=$((total_threads + app_threads))
+                    total_memory_used=$((total_memory_used + (app_threads * THREAD_MEMORY_USAGE)))
+                fi
+            done
+        fi
+    done
+
+    echo "$total_apps $total_threads $total_memory_used $total_instances"
+}
+
+# Smart thread allocation based on total apps
+calculate_smart_threads() {
+    local base_threads=$1
+    local existing_apps=$2
+    local total_memory_mb=$3
+    local available_memory_mb=$4
+    local total_cpu_cores=$5
+
+    # Base allocation
+    local smart_threads=$base_threads
+
+    # Reduce threads based on number of existing apps
+    if [ $existing_apps -gt 0 ]; then
+        # Calculate resource per app
+        local memory_per_app=$(($total_memory_mb / ($existing_apps + 1)))
+        local cpu_per_app=$(echo "$total_cpu_cores / ($existing_apps + 1)" | bc -l)
+
+        # Adjust threads based on memory constraint
+        local max_threads_by_memory=$(($memory_per_app / $THREAD_MEMORY_USAGE))
+        if [ $max_threads_by_memory -lt $smart_threads ]; then
+            smart_threads=$max_threads_by_memory
+        fi
+
+        # Adjust threads based on CPU constraint
+        local max_threads_by_cpu=$(echo "$cpu_per_app * 2" | bc -l | cut -d'.' -f1)
+        if [ $max_threads_by_cpu -lt $smart_threads ]; then
+            smart_threads=$max_threads_by_cpu
+        fi
+
+        # Apply scaling factor based on app count
+        if [ $existing_apps -ge 5 ]; then
+            smart_threads=$((smart_threads * 70 / 100))  # 30% reduction for 5+ apps
+        elif [ $existing_apps -ge 3 ]; then
+            smart_threads=$((smart_threads * 80 / 100))  # 20% reduction for 3-4 apps
+        elif [ $existing_apps -ge 1 ]; then
+            smart_threads=$((smart_threads * 90 / 100))  # 10% reduction for 1-2 apps
+        fi
+    fi
+
+    # Ensure minimum viable threads
+    if [ $smart_threads -lt 2 ]; then
+        smart_threads=2
+    fi
+
+    echo $smart_threads
+}
+
+# Function to calculate optimal FrankenPHP thread count
+calculate_optimal_threads() {
+    local cpu_cores=$(nproc)
+    local available_memory_gb=$(free -g | awk 'NR==2{print $7}')
+    local optimal_threads
+
+    # Base calculation: Start with CPU cores
+    if [ $cpu_cores -eq 1 ]; then
+        # Single core: Use 2 threads to avoid blocking
+        optimal_threads=2
+    elif [ $cpu_cores -eq 2 ]; then
+        # Dual core: Use 3 threads (1.5x cores)
+        optimal_threads=3
+    elif [ $cpu_cores -le 4 ]; then
+        # Quad core or less: Use cores + 1
+        optimal_threads=$((cpu_cores + 1))
+    elif [ $cpu_cores -le 8 ]; then
+        # 6-8 cores: Use cores + 2
+        optimal_threads=$((cpu_cores + 2))
+    else
+        # High core count: Use 75% of cores + 4 (to avoid overloading)
+        optimal_threads=$(((cpu_cores * 3 / 4) + 4))
+    fi
+
+    # Memory constraint check (each thread can use ~50-100MB)
+    # Conservative estimate: 80MB per thread
+    local max_threads_by_memory=$((available_memory_gb * 1024 / 80))
+
+    # Use the lower of CPU-based or memory-based calculation
+    if [ $max_threads_by_memory -lt $optimal_threads ]; then
+        optimal_threads=$max_threads_by_memory
+    fi
+
+    # Ensure minimum of 2 threads and maximum of 32 threads
+    if [ $optimal_threads -lt 2 ]; then
+        optimal_threads=2
+    elif [ $optimal_threads -gt 32 ]; then
+        optimal_threads=32
+    fi
+
+    echo $optimal_threads
 }
 
 echo ""
