@@ -601,6 +601,81 @@ display_resource_warnings() {
 }
 
 # =============================================
+# 0. Configure Indonesia Mirror & Remove Apache (Idempotent)
+# =============================================
+log_info "Configuring Indonesia mirror servers..."
+
+# Backup original sources.list
+if [ ! -f /etc/apt/sources.list.backup ]; then
+    log_info "Backing up original sources.list..."
+    cp /etc/apt/sources.list /etc/apt/sources.list.backup
+fi
+
+# Detect Ubuntu version
+UBUNTU_VERSION=$(lsb_release -cs)
+log_info "Detected Ubuntu version: $UBUNTU_VERSION"
+
+# Configure Indonesia mirror (using reliable Indonesia mirrors)
+log_info "Configuring Indonesia mirror servers..."
+cat > /etc/apt/sources.list <<EOF
+# Indonesia Mirror - Fast and reliable mirrors for Indonesia
+deb http://mirror.unej.ac.id/ubuntu/ $UBUNTU_VERSION main restricted universe multiverse
+deb http://mirror.unej.ac.id/ubuntu/ $UBUNTU_VERSION-updates main restricted universe multiverse
+deb http://mirror.unej.ac.id/ubuntu/ $UBUNTU_VERSION-backports main restricted universe multiverse
+deb http://mirror.unej.ac.id/ubuntu/ $UBUNTU_VERSION-security main restricted universe multiverse
+
+# Fallback to other Indonesia mirrors
+deb http://buaya.klas.or.id/ubuntu/ $UBUNTU_VERSION main restricted universe multiverse
+deb http://buaya.klas.or.id/ubuntu/ $UBUNTU_VERSION-updates main restricted universe multiverse
+deb http://buaya.klas.or.id/ubuntu/ $UBUNTU_VERSION-backports main restricted universe multiverse
+deb http://buaya.klas.or.id/ubuntu/ $UBUNTU_VERSION-security main restricted universe multiverse
+
+# Ultimate fallback to official Ubuntu mirrors
+deb http://archive.ubuntu.com/ubuntu/ $UBUNTU_VERSION main restricted universe multiverse
+deb http://archive.ubuntu.com/ubuntu/ $UBUNTU_VERSION-updates main restricted universe multiverse
+deb http://archive.ubuntu.com/ubuntu/ $UBUNTU_VERSION-backports main restricted universe multiverse
+deb http://security.ubuntu.com/ubuntu/ $UBUNTU_VERSION-security main restricted universe multiverse
+EOF
+
+# Remove Apache and related packages if installed
+log_info "Removing Apache and conflicting web servers..."
+APACHE_PACKAGES=(
+    "apache2"
+    "apache2-bin"
+    "apache2-common"
+    "apache2-data"
+    "apache2-utils"
+    "libapache2-mod-php*"
+    "nginx"
+    "nginx-common"
+    "nginx-core"
+)
+
+for package in "\${APACHE_PACKAGES[@]}"; do
+    if dpkg -l | grep -q "^ii.*$package"; then
+        log_info "Removing $package..."
+        apt remove --purge -y $package
+    fi
+done
+
+# Stop and disable Apache/Nginx services if running
+for service in apache2 nginx; do
+    if systemctl is-active --quiet $service; then
+        log_info "Stopping $service service..."
+        systemctl stop $service
+    fi
+    if systemctl is-enabled --quiet $service 2>/dev/null; then
+        log_info "Disabling $service service..."
+        systemctl disable $service
+    fi
+done
+
+# Clean up Apache/Nginx configuration directories
+log_info "Cleaning up web server configurations..."
+rm -rf /etc/apache2 /etc/nginx /var/www/html
+log_info "✅ Apache and Nginx removed successfully"
+
+# =============================================
 # 1. System Update & Basic Packages (Idempotent)
 # =============================================
 log_info "Checking and updating system packages..."
@@ -657,6 +732,9 @@ done
 # =============================================
 log_info "Installing PHP 8.3 and extensions for FrankenPHP..."
 
+# Set environment to prevent Apache installation
+export DEBIAN_FRONTEND=noninteractive
+
 # Add PHP repository only if not already added
 if ! grep -q "ondrej/php" /etc/apt/sources.list.d/*.list 2>/dev/null; then
     log_info "Adding PHP repository..."
@@ -665,6 +743,10 @@ if ! grep -q "ondrej/php" /etc/apt/sources.list.d/*.list 2>/dev/null; then
 else
     log_info "✅ PHP repository already added"
 fi
+
+# Prevent Apache installation by holding packages
+log_info "Preventing Apache installation..."
+apt-mark hold apache2 apache2-bin apache2-common apache2-data apache2-utils nginx nginx-common nginx-core 2>/dev/null || true
 
 # Install PHP packages only if not already installed
 PHP_PACKAGES=(
@@ -693,6 +775,20 @@ for package in "${PHP_PACKAGES[@]}"; do
         log_info "✅ $package already installed"
     fi
 done
+
+# Double check: Remove Apache if it was installed as dependency
+log_info "Double-checking Apache removal..."
+if dpkg -l | grep -q "^ii.*apache2"; then
+    log_warning "⚠️  Apache was installed as dependency, removing it..."
+    apt remove --purge -y apache2* libapache2-mod-php*
+    systemctl stop apache2 2>/dev/null || true
+    systemctl disable apache2 2>/dev/null || true
+fi
+
+# Unhold packages after installation
+apt-mark unhold apache2 apache2-bin apache2-common apache2-data apache2-utils nginx nginx-common nginx-core 2>/dev/null || true
+
+log_info "✅ PHP 8.3 installed without Apache"
 
 # =============================================
 # 3. Install Composer (Idempotent)
@@ -811,8 +907,28 @@ chown -R www-data:www-data /var/log/frankenphp
 chown -R www-data:www-data /var/backups/laravel-apps
 
 # =============================================
-# 8. Configure Firewall (Idempotent)
+# 8. Check Port Availability & Configure Firewall (Idempotent)
 # =============================================
+log_info "Checking port availability..."
+
+# Check if ports 80 and 443 are free
+PORTS_TO_CHECK=("80" "443")
+for port in "${PORTS_TO_CHECK[@]}"; do
+    if netstat -tlnp | grep -q ":$port "; then
+        local process=$(netstat -tlnp | grep ":$port " | awk '{print $7}' | cut -d'/' -f2 | head -1)
+        log_warning "⚠️  Port $port is being used by: $process"
+        
+        # If it's Apache or Nginx, try to stop it
+        if [[ "$process" == "apache2" || "$process" == "nginx" ]]; then
+            log_info "Stopping $process to free port $port..."
+            systemctl stop $process 2>/dev/null || true
+            systemctl disable $process 2>/dev/null || true
+        fi
+    else
+        log_info "✅ Port $port is available"
+    fi
+done
+
 log_info "Configuring firewall..."
 
 # Enable firewall if not already enabled
@@ -1784,16 +1900,18 @@ SyslogIdentifier=octane-$APP_NAME
 Environment=APP_ENV=production
 Environment=APP_DEBUG=false
 
+# Resource limits
 LimitNOFILE=65536
 LimitNPROC=32768
 
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=$APP_DIR/storage
-ReadWritePaths=$APP_DIR/bootstrap/cache
-ReadWritePaths=$APP_DIR/public/storage
+# Security settings - relaxed for compatibility
+NoNewPrivileges=false
+PrivateTmp=false
+PrivateDevices=false
+ProtectSystem=false
+ProtectHome=false
+ReadWritePaths=$APP_DIR /tmp /var/log/frankenphp
+ReadOnlyPaths=/etc/laravel-apps
 
 [Install]
 WantedBy=multi-user.target
@@ -1823,16 +1941,18 @@ SyslogIdentifier=frankenphp-$APP_NAME
 Environment=APP_ENV=production
 Environment=APP_DEBUG=false
 
+# Resource limits
 LimitNOFILE=65536
 LimitNPROC=32768
 
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=$APP_DIR/storage
-ReadWritePaths=$APP_DIR/bootstrap/cache
-ReadWritePaths=$APP_DIR/public/storage
+# Security settings - relaxed for compatibility
+NoNewPrivileges=false
+PrivateTmp=false
+PrivateDevices=false
+ProtectSystem=false
+ProtectHome=false
+ReadWritePaths=$APP_DIR /tmp /var/log/frankenphp
+ReadOnlyPaths=/etc/laravel-apps
 
 [Install]
 WantedBy=multi-user.target
@@ -2585,16 +2705,18 @@ SyslogIdentifier=octane-$APP_NAME-$PORT
 Environment=APP_ENV=production
 Environment=APP_DEBUG=false
 
+# Resource limits
 LimitNOFILE=65536
 LimitNPROC=32768
 
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=$INSTANCE_DIR/storage
-ReadWritePaths=$INSTANCE_DIR/bootstrap/cache
-ReadWritePaths=$INSTANCE_DIR/public/storage
+# Security settings - relaxed for compatibility
+NoNewPrivileges=false
+PrivateTmp=false
+PrivateDevices=false
+ProtectSystem=false
+ProtectHome=false
+ReadWritePaths=$INSTANCE_DIR /tmp /var/log/frankenphp
+ReadOnlyPaths=/etc/laravel-apps
 
 [Install]
 WantedBy=multi-user.target
@@ -2668,16 +2790,18 @@ SyslogIdentifier=frankenphp-$APP_NAME-$PORT
 Environment=APP_ENV=production
 Environment=APP_DEBUG=false
 
+# Resource limits
 LimitNOFILE=65536
 LimitNPROC=32768
 
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=$INSTANCE_DIR/storage
-ReadWritePaths=$INSTANCE_DIR/bootstrap/cache
-ReadWritePaths=$INSTANCE_DIR/public/storage
+# Security settings - relaxed for compatibility
+NoNewPrivileges=false
+PrivateTmp=false
+PrivateDevices=false
+ProtectSystem=false
+ProtectHome=false
+ReadWritePaths=$INSTANCE_DIR /tmp /var/log/frankenphp
+ReadOnlyPaths=/etc/laravel-apps
 
 [Install]
 WantedBy=multi-user.target
@@ -4124,14 +4248,14 @@ log_info "  scale-laravel-app <name> <scale-up|scale-down> <port>"
 log_info "  status-laravel-app <name>"
 log_info "  backup-all-laravel-apps"
 log_info ""
-log_info "🔥 Laravel Octane Helper (octane-helper.sh):"
-log_info "  octane-helper.sh install [directory]     - Install Laravel Octane with FrankenPHP"
-log_info "  octane-helper.sh configure [directory]   - Configure existing Laravel app for Octane"
-log_info "  octane-helper.sh start [directory]       - Start Laravel Octane server"
-log_info "  octane-helper.sh stop [directory]        - Stop Laravel Octane server"
-log_info "  octane-helper.sh status [directory]      - Check Octane server status"
-log_info "  octane-helper.sh optimize [directory]    - Optimize Laravel app for Octane"
-log_info "  octane-helper.sh debug [directory]       - Debug Octane installation issues"
+log_info "🔥 Laravel Octane Helper (install.sh):"
+log_info "  install.sh octane:install [directory]    - Install Laravel Octane with FrankenPHP"
+log_info "  install.sh octane:start [directory]      - Start Laravel Octane server"
+log_info "  install.sh octane:stop [directory]       - Stop Laravel Octane server"
+log_info "  install.sh octane:restart [directory]    - Restart Laravel Octane server"
+log_info "  install.sh octane:status [directory]     - Check Octane server status"
+log_info "  install.sh octane:optimize [directory]   - Optimize Laravel app for Octane"
+log_info "  install.sh debug [directory]             - Debug Octane installation issues"
 log_info ""
 log_info "🔍 Resource Monitoring & Optimization:"
 log_info "  monitor-server-resources             - Real-time server resource monitoring"
@@ -4145,11 +4269,10 @@ log_info "  create-laravel-app web_crm_app crm.completelabs.com https://github.c
 log_info "  create-laravel-app web_api_service api.completelabs.com"
 log_info ""
 log_info "🔥 Laravel Octane examples:"
-log_info "  ./octane-helper.sh install /opt/laravel-apps/web_sam"
-log_info "  ./octane-helper.sh configure ."
-log_info "  ./octane-helper.sh start"
-log_info "  ./octane-helper.sh optimize /var/www/laravel-app"
-log_info "  ./octane-helper.sh debug                              # Debug installation issues"
+log_info "  ./install.sh octane:install /opt/laravel-apps/web_sam"
+log_info "  ./install.sh octane:start ."
+log_info "  ./install.sh octane:optimize /var/www/laravel-app"
+log_info "  ./install.sh debug                                   # Debug installation issues"
 log_info ""
 log_info "📝 App naming rules:"
 log_info "  - Use underscores instead of dashes (web_sam not web-sam)"

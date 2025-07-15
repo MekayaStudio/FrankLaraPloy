@@ -1,321 +1,564 @@
-# FrankenPHP Multi-App Deployer dengan Laravel Octane
+# FrankenPHP Multi-App Deployment System
 
-Script deployment otomatis untuk multiple Laravel apps menggunakan FrankenPHP dengan dukungan penuh Laravel Octane.
+Sistem deployment multi-aplikasi Laravel yang menggunakan FrankenPHP dengan dukungan Laravel Octane, load balancing, dan resource monitoring yang cerdas.
 
 ## 🚀 Fitur Utama
 
-### Laravel Octane Integration
-- **Automatic Detection**: Script secara otomatis mendeteksi Laravel apps dan menggunakan Laravel Octane
-- **FrankenPHP Binary Management**: Otomatis download FrankenPHP binary via Laravel Octane
-- **Smart Configuration**: Konfigurasi optimal berdasarkan resource server
-- **Fallback Support**: Mendukung non-Laravel apps dengan standalone FrankenPHP
+### 🔥 Laravel Octane + FrankenPHP
+- **Embedded PHP Server**: Tidak memerlukan PHP-FPM
+- **Built-in Caddy Web Server**: Reverse proxy otomatis
+- **Auto HTTPS**: Let's Encrypt terintegrasi
+- **Worker Optimization**: Kalkulasi thread optimal berdasarkan CPU/Memory
+- **Apache/Nginx Removal**: Otomatis menghapus Apache/Nginx untuk mencegah konflik
+- **Indonesia Mirror**: Menggunakan mirror server Indonesia untuk download lebih cepat
 
-### Deployment Modes
-- **🔥 Laravel Apps**: Menggunakan Laravel Octane + FrankenPHP untuk performa optimal
-- **📁 Non-Laravel Apps**: Fallback ke standalone FrankenPHP
-- **🔄 Mixed Environment**: Mendukung kedua mode secara bersamaan
+### 📈 Horizontal Scaling
+- **Load Balancer**: Round-robin load balancing
+- **Multi-Instance**: Scaling horizontal per aplikasi
+- **Health Checks**: Monitoring kesehatan instance
+- **Zero-Downtime**: Deployment tanpa downtime
 
-### Resource Management
-- **🛡️ Pre-flight Checks**: Mencegah resource overcommitment
-- **🧠 Smart Worker Allocation**: Alokasi worker berdasarkan kapasitas server
-- **⚠️ Warning System**: Sistem peringatan untuk threshold resource
-- **📊 Real-time Monitoring**: Monitoring resource secara real-time
+### 🧠 Resource Awareness
+- **Pre-flight Checks**: Validasi resource sebelum deployment
+- **Smart Thread Allocation**: Optimasi berdasarkan kapasitas server
+- **Resource Monitoring**: Real-time monitoring CPU/Memory
+- **Capacity Planning**: Prediksi dampak perubahan
 
-## 📦 Instalasi
+### 🔧 Multi-App Support
+- **Isolated Apps**: Setiap app memiliki database dan konfigurasi terpisah
+- **GitHub Integration**: Auto-deployment dari repository
+- **Database Management**: MySQL database per app
+- **Backup System**: Backup otomatis harian
 
-### 1. Download Script
-```bash
-wget https://raw.githubusercontent.com/user/repo/main/frankenphp-multiapp-deployer.sh
-chmod +x frankenphp-multiapp-deployer.sh
+## 📁 Struktur Project
+
+```
+scripts/
+├── lib/                              # Shared libraries
+│   ├── shared-functions.sh           # Fungsi-fungsi umum
+│   ├── error-handler.sh              # Error handling & rollback
+│   └── validation.sh                 # Validasi komprehensif
+├── config/
+│   └── frankenphp-config.conf        # Konfigurasi sistem
+├── install.sh                       # 🆕 One-command installer
+├── frankenphp-multiapp-deployer.sh   # Script sistem deployment
+├── octane-helper.sh                  # Helper Laravel Octane
+└── README.md                         # Dokumentasi ini
 ```
 
-### 2. Jalankan Setup
+## 🛠️ Instalasi
+
+### Persyaratan Sistem
+
+- **OS**: Ubuntu 24.04 LTS
+- **RAM**: Minimum 1GB (recommended 2GB+)
+- **Storage**: Minimum 5GB free space
+- **Network**: Koneksi internet untuk download dependencies
+- **User**: Root access required
+
+### Quick Start
+
 ```bash
-sudo ./frankenphp-multiapp-deployer.sh
+# Clone repository
+git clone <repository-url>
+cd scripts
+
+# Setup sistem (one-time setup)
+sudo ./install.sh setup
+
+# Install aplikasi Laravel baru
+./install.sh install web_sam example.com https://github.com/user/repo.git
+
+# Atau quick install (setup + install sekaligus)
+sudo ./install.sh quick web_sam example.com https://github.com/user/repo.git
 ```
 
-### 3. Download Octane Helper
+## 📚 Penggunaan
+
+### 1. Deployment Aplikasi Baru
+
 ```bash
-wget https://raw.githubusercontent.com/user/repo/main/octane-helper.sh
-chmod +x octane-helper.sh
+# Dengan GitHub repository
+./install.sh install web_sam testingsetup.rizqis.com https://github.com/CompleteLabs/web-app-sam.git
+
+# Tanpa GitHub (manual deployment)
+./install.sh install web_api api.completelabs.com
+
+# Quick install (setup + install sekaligus)
+sudo ./install.sh quick web_sam example.com https://github.com/user/repo.git
 ```
 
-## 🔧 Penggunaan
+### 2. Laravel Octane Helper
 
-### Membuat Laravel App dengan Octane
 ```bash
-# Otomatis menggunakan Laravel Octane jika app Laravel terdeteksi
-create-laravel-app web_sam testingsetup.rizqis.com https://github.com/CompleteLabs/web-app-sam.git
+# Install Laravel Octane + FrankenPHP
+./install.sh octane:install /opt/laravel-apps/web_sam
 
-# Script akan:
-# 1. Clone repository
-# 2. Install Laravel Octane
-# 3. Download FrankenPHP binary via Octane
-# 4. Konfigurasi optimal workers
-# 5. Setup reverse proxy dengan Caddy
-# 6. Buat systemd service untuk Octane
+# Start/Stop/Status server
+./install.sh octane:start
+./install.sh octane:stop
+./install.sh octane:status
+
+# Restart server
+./install.sh octane:restart
+
+# Optimize for production
+./install.sh octane:optimize
 ```
 
-### Laravel Octane Helper Commands
+### 3. Manajemen Aplikasi
+
 ```bash
-# Install Octane pada Laravel app yang sudah ada
-./octane-helper.sh install /opt/laravel-apps/web_sam
+# List semua aplikasi
+./install.sh list
 
-# Konfigurasi optimal untuk Octane
-./octane-helper.sh configure .
+# Deploy ulang aplikasi
+./install.sh deploy web_sam
 
-# Start Octane server
-./octane-helper.sh start
+# Status aplikasi
+./install.sh status web_sam
 
-# Stop Octane server  
-./octane-helper.sh stop
-
-# Check status server
-./octane-helper.sh status
-
-# Optimize Laravel app untuk Octane
-./octane-helper.sh optimize
+# Remove aplikasi
+./install.sh remove web_sam
 ```
 
-### Management Commands
+### 4. Horizontal Scaling
+
 ```bash
-# List semua apps
-list-laravel-apps
+# Scale up (tambah instance)
+./install.sh scale web_sam up 8001
+./install.sh scale web_sam up 8002
 
-# Deploy ulang app
-deploy-laravel-app web_sam
+# Scale down (hapus instance)
+./install.sh scale web_sam down 8002
 
-# Scale horizontal
-scale-laravel-app web_sam scale-up 8001
-scale-laravel-app web_sam scale-down 8001
+# Check status scaling
+./install.sh status web_sam
+```
 
-# Status app
-status-laravel-app web_sam
+### 5. Resource Monitoring
 
-# Remove app
-remove-laravel-app web_sam
+```bash
+# Monitor resource server
+./install.sh monitor
+
+# Debug system atau app
+./install.sh debug
+./install.sh debug web_sam
+
+# Test components
+./install.sh test
+
+# Backup semua apps
+./install.sh backup
+```
+
+## ⚙️ Konfigurasi
+
+### File Konfigurasi Utama
+
+**`config/frankenphp-config.conf`**
+```bash
+# Resource Management
+MEMORY_SAFETY_MARGIN=20
+CPU_SAFETY_MARGIN=25
+MIN_MEMORY_PER_APP=512
+MAX_MEMORY_PER_APP=2048
+THREAD_MEMORY_USAGE=80
+MAX_APPS_PER_SERVER=10
+
+# FrankenPHP Configuration
+DEFAULT_HTTP_PORT=80
+DEFAULT_HTTPS_PORT=443
+DEFAULT_OCTANE_PORT=8000
+
+# Performance Settings
+PHP_MEMORY_LIMIT="512M"
+PHP_MAX_EXECUTION_TIME=300
+OPCACHE_MEMORY_CONSUMPTION=256
+```
+
+### Konfigurasi Per-App
+
+Setiap aplikasi memiliki file konfigurasi di `/etc/laravel-apps/`:
+
+```bash
+# /etc/laravel-apps/web_sam.conf
+APP_NAME=web_sam
+APP_DIR=/opt/laravel-apps/web_sam
+DOMAIN=testingsetup.rizqis.com
+DB_NAME=web_sam_db
+DB_USER=web_sam_user
+DB_PASS=generated_password
+GITHUB_REPO=https://github.com/CompleteLabs/web-app-sam.git
+CREATED_AT=2024-01-01 10:00:00
+```
+
+## 🔧 Advanced Usage
+
+### Custom Environment Variables
+
+```bash
+# Enable debug mode
+export DEBUG=true
+./octane-helper-refactored.sh debug
+
+# Skip pre-flight checks (development)
+export SKIP_PREFLIGHT_CHECKS=true
+create-laravel-app test_app localhost
+```
+
+### Manual FrankenPHP Configuration
+
+```bash
+# Custom Caddyfile untuk load balancing
+cat > /opt/laravel-apps/web_sam/Caddyfile <<EOF
+{
+    frankenphp {
+        num_threads 8
+    }
+}
+
+example.com {
+    reverse_proxy {
+        to localhost:8000
+        to localhost:8001
+        to localhost:8002
+        lb_policy round_robin
+        health_uri /health
+        health_interval 30s
+    }
+}
+EOF
+```
+
+### Database Management
+
+```bash
+# Manual database operations
+source /root/.mysql_credentials
+mysql -u root -p$MYSQL_ROOT_PASS
+
+# Create database manually
+CREATE DATABASE `new_app_db`;
+CREATE USER 'new_app_user'@'localhost' IDENTIFIED BY 'secure_password';
+GRANT ALL PRIVILEGES ON `new_app_db`.* TO 'new_app_user'@'localhost';
+FLUSH PRIVILEGES;
+```
+
+## 🛡️ Security Best Practices
+
+### 1. Systemd Security Settings
+
+Secara default, systemd service menggunakan pengaturan keamanan yang fleksibel untuk kompatibilitas. Anda dapat mengubah ke mode strict di `config/frankenphp-config.conf`:
+
+```bash
+# Untuk keamanan strict (mungkin menyebabkan konflik pada beberapa sistem)
+SYSTEMD_STRICT_SECURITY=true
+SYSTEMD_PRIVATE_TMP=true
+SYSTEMD_PRIVATE_DEVICES=true
+SYSTEMD_PROTECT_SYSTEM=strict
+SYSTEMD_PROTECT_HOME=true
+SYSTEMD_NO_NEW_PRIVILEGES=true
+
+# Untuk kompatibilitas maksimal (default)
+SYSTEMD_STRICT_SECURITY=false
+SYSTEMD_PRIVATE_TMP=false
+SYSTEMD_PRIVATE_DEVICES=false
+SYSTEMD_PROTECT_SYSTEM=false
+SYSTEMD_PROTECT_HOME=false
+SYSTEMD_NO_NEW_PRIVILEGES=false
+```
+
+### 2. Apache/Nginx Removal
+
+Script otomatis menghapus Apache dan Nginx untuk mencegah konflik dengan FrankenPHP:
+
+```bash
+# Apache dan Nginx dihapus otomatis saat setup
+# Termasuk:
+# - apache2, apache2-bin, apache2-common, apache2-data, apache2-utils
+# - nginx, nginx-common, nginx-core
+# - libapache2-mod-php*
+# - /etc/apache2, /etc/nginx, /var/www/html
+
+# Cek apakah Apache/Nginx sudah dihapus
+systemctl status apache2  # Should show "not found"
+systemctl status nginx    # Should show "not found"
+```
+
+### 3. Indonesia Mirror Configuration
+
+Script menggunakan mirror server Indonesia untuk download lebih cepat:
+
+```bash
+# Mirror yang digunakan (berurutan):
+# 1. mirror.unej.ac.id (Universitas Jember)
+# 2. buaya.klas.or.id (KLAS)
+# 3. archive.ubuntu.com (fallback)
+
+# Backup original sources.list disimpan di:
+# /etc/apt/sources.list.backup
+```
+
+### 4. Firewall Configuration
+
+```bash
+# Firewall sudah dikonfigurasi otomatis
+ufw status
+# Status: active
+# To                         Action      From
+# --                         ------      ----
+# 22/tcp                     ALLOW       Anywhere
+# 80/tcp                     ALLOW       Anywhere
+# 443/tcp                    ALLOW       Anywhere
+```
+
+### 2. File Permissions
+
+```bash
+# Permissions otomatis diatur
+ls -la /opt/laravel-apps/web_sam/
+# drwxr-xr-x www-data www-data
+# -rw-r--r-- www-data www-data
+```
+
+### 3. SSL/TLS Configuration
+
+```bash
+# Enable HTTPS otomatis
+enable-https-app web_sam
+
+# Manual SSL configuration
+# Edit Caddyfile dan ubah auto_https off menjadi auto_https on
+```
+
+## 📊 Monitoring & Logging
+
+### Log Files
+
+```bash
+# Application logs
+tail -f /var/log/frankenphp/web_sam.log
+
+# Error logs
+tail -f /var/log/frankenphp/error.log
+
+# System logs
+journalctl -u frankenphp-web_sam -f
 ```
 
 ### Resource Monitoring
+
 ```bash
-# Monitor resource server
-monitor-server-resources
+# Real-time monitoring
+watch -n 5 'monitor-server-resources'
 
-# Analisis resource per app
-analyze-app-resources
+# Detailed analysis
+analyze-app-resources | grep -A 10 "web_sam"
 
-# Prediksi impact perubahan
-predict-resource-impact new-app web_new_app
-predict-resource-impact scale-up web_sam
-
-# Optimisasi resource
-optimize-server-resources
+# Performance metrics
+htop
 ```
 
-## 🏗️ Arsitektur
+### Health Checks
 
-### Laravel Octane Mode
-```
-Internet -> Caddy (Port 80/443) -> Laravel Octane (Port 8000) -> FrankenPHP Workers
-```
-
-### Standalone Mode
-```
-Internet -> Caddy (Port 80/443) -> FrankenPHP Direct Serve
-```
-
-### Load Balancer Mode
-```
-Internet -> Caddy Load Balancer -> Multiple Octane/FrankenPHP Instances
-```
-
-## 📊 Konfigurasi Optimal
-
-### Worker Calculation
-Script menghitung jumlah worker optimal berdasarkan:
-- **CPU Cores**: Base calculation dari jumlah CPU
-- **Memory Available**: Constraint berdasarkan memory tersedia
-- **Existing Apps**: Adjustment berdasarkan jumlah app yang sudah ada
-- **Safety Margins**: Reserve 20% memory dan 25% CPU
-
-### Resource Allocation
-- **Single Core**: 2 workers
-- **Dual Core**: 3 workers  
-- **Quad Core**: 5 workers
-- **8 Cores**: 10 workers
-- **16+ Cores**: 75% cores + 4 workers
-
-## 🔄 Scaling
-
-### Horizontal Scaling
 ```bash
-# Scale up - tambah instance baru
-scale-laravel-app web_sam scale-up 8001
+# Check app health
+curl http://localhost:8000/health
 
-# Load balancer otomatis dikonfigurasi:
-# - Main instance: localhost:8000
-# - New instance: localhost:8001
-# - Round robin load balancing
-# - Health checks
+# Check all services
+systemctl status frankenphp-web_sam
+systemctl status mysql
+systemctl status redis
 ```
 
-### Auto-scaling Features
-- **Load Balancer**: Otomatis setup reverse proxy
-- **Health Checks**: Monitoring kesehatan instance
-- **Failover**: Automatic failover jika instance down
-- **Session Affinity**: Sticky sessions jika diperlukan
+## 🔄 Backup & Recovery
 
-## 📝 Konfigurasi Files
+### Automated Backup
 
-### Systemd Service (Laravel Octane)
-```ini
-[Unit]
-Description=Laravel Octane FrankenPHP Server for web_sam
-After=network.target mysql.service redis.service
-
-[Service]
-Type=simple
-User=www-data
-Group=www-data
-WorkingDirectory=/opt/laravel-apps/web_sam
-ExecStart=/usr/bin/php artisan octane:start --server=frankenphp --host=0.0.0.0 --port=8000 --workers=8
-Restart=always
-```
-
-### Caddyfile (Reverse Proxy)
-```
-testingsetup.rizqis.com {
-    encode zstd gzip
-    
-    reverse_proxy localhost:8000 {
-        header_up Host {http.request.host}
-        header_up X-Real-IP {http.request.remote}
-        header_up X-Forwarded-For {http.request.remote}
-        header_up X-Forwarded-Proto {http.request.scheme}
-        
-        health_uri /health
-        health_interval 30s
-        health_timeout 5s
-    }
-}
-```
-
-### Octane Configuration
-```php
-// config/octane.php
-return [
-    'server' => 'frankenphp',
-    'servers' => [
-        'frankenphp' => [
-            'host' => '0.0.0.0',
-            'port' => 8000,
-            'workers' => 8,
-            'max_requests' => 500,
-        ],
-    ],
-    'garbage_collection' => [
-        'enabled' => true,
-        'app_memory' => 50,
-        'reset_memory' => 100,
-        'reset_requests' => 1000,
-    ],
-];
-```
-
-## 🚨 Troubleshooting
-
-### Laravel Octane Issues
 ```bash
-# Check Octane status
-./octane-helper.sh status
+# Backup otomatis setiap hari jam 2 pagi
+crontab -l | grep backup
+# 0 2 * * * /usr/local/bin/backup-all-laravel-apps
 
-# Restart Octane
-systemctl restart frankenphp-web_sam
-
-# Check logs
-tail -f /var/log/frankenphp/web_sam.log
-
-# Clear Octane cache
-./octane-helper.sh optimize
+# Manual backup
+backup-all-laravel-apps
 ```
 
-### Resource Issues
+### Recovery Process
+
+```bash
+# Restore dari backup
+cd /var/backups/laravel-apps/20240101_020000/
+
+# Restore database
+mysql -u root -p$MYSQL_ROOT_PASS web_sam_db < web_sam_database.sql
+
+# Restore application files
+tar -xzf web_sam_app.tar.gz -C /opt/laravel-apps/web_sam/
+```
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+**1. FrankenPHP Binary Not Found**
+```bash
+# Debug installation
+./octane-helper-refactored.sh debug
+
+# Manual download
+cd /opt/laravel-apps/web_sam
+wget https://github.com/php/frankenphp/releases/download/v1.8.0/frankenphp-linux-x86_64
+mv frankenphp-linux-x86_64 frankenphp
+chmod +x frankenphp
+```
+
+**2. High Memory Usage**
 ```bash
 # Check resource usage
 monitor-server-resources
 
-# Optimize resources
+# Optimize thread allocation
 optimize-server-resources
 
-# Check specific app
-analyze-app-resources
+# Reduce workers per app
+sed -i 's/OCTANE_WORKERS=8/OCTANE_WORKERS=4/' /opt/laravel-apps/web_sam/.env
+systemctl restart frankenphp-web_sam
 ```
 
-### Performance Tuning
+**3. Database Connection Issues**
 ```bash
-# Optimize PHP for Octane
-# File: /etc/php/8.3/cli/conf.d/99-frankenphp-optimizations.ini
-opcache.enable=1
-opcache.enable_cli=1
-memory_limit=512M
-realpath_cache_size=4096k
+# Test connection
+mysql -u root -p$(cat /root/.mysql_credentials | cut -d'=' -f2)
+
+# Reset MySQL password
+mysql_secure_installation
 ```
 
-## 📈 Performance Benefits
+**4. Port Already in Use**
+```bash
+# Check port usage
+netstat -tulpn | grep :8000
 
-### Laravel Octane + FrankenPHP
-- **10x Faster**: Dibandingkan dengan traditional PHP-FPM
-- **Memory Efficient**: Shared memory antar workers
-- **Persistent State**: Database connections, compiled views
-- **Zero Cold Start**: Workers selalu warm
-- **HTTP/2 Support**: Native HTTP/2 dan HTTP/3
-
-### Resource Optimization
-- **Smart Allocation**: Worker count berdasarkan resource
-- **Garbage Collection**: Automatic memory management
-- **Request Limiting**: Prevent memory leaks
-- **Health Monitoring**: Automatic worker restart
-
-## 🔐 Security
-
-### Systemd Hardening
-```ini
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/opt/laravel-apps/web_sam/storage
+# Kill process
+sudo kill -9 $(lsof -t -i:8000)
 ```
 
-### Network Security
-- **Firewall Rules**: Otomatis konfigurasi UFW
-- **HTTPS Only**: Automatic HTTPS dengan Let's Encrypt
-- **Security Headers**: HSTS, CSP, XSS Protection
-- **Rate Limiting**: Built-in rate limiting
+### Error Recovery
 
-## 🎯 Best Practices
+```bash
+# Rollback failed deployment
+# System otomatis melakukan rollback jika terjadi error
 
-### Laravel Octane Development
-1. **Stateless Code**: Hindari global state
-2. **Memory Management**: Monitor memory usage
-3. **Database Connections**: Gunakan connection pooling
-4. **Caching**: Leverage Redis untuk session dan cache
-5. **Queue Workers**: Gunakan separate queue workers
+# Manual rollback
+remove-laravel-app failed_app
+# Kemudian deploy ulang
 
-### Deployment Strategy
-1. **Pre-flight Checks**: Selalu jalankan resource check
-2. **Gradual Scaling**: Scale bertahap, monitor resource
-3. **Health Monitoring**: Setup monitoring dan alerting
-4. **Backup Strategy**: Regular backup database dan files
-5. **Update Strategy**: Blue-green deployment untuk zero downtime
+# Check error logs
+tail -f /var/log/frankenphp/error.log
+```
 
-## 📞 Support
+## 📈 Performance Optimization
 
-Untuk pertanyaan dan dukungan:
-- **GitHub Issues**: Report bugs dan feature requests
-- **Documentation**: Lihat dokumentasi lengkap
-- **Community**: Join Discord/Slack community
+### 1. Thread Optimization
+
+```bash
+# System otomatis menghitung optimal threads
+# Berdasarkan CPU cores dan memory available
+
+# Manual optimization
+CPU_CORES=$(nproc)
+OPTIMAL_THREADS=$((CPU_CORES + 2))
+echo "OCTANE_WORKERS=$OPTIMAL_THREADS" >> /opt/laravel-apps/web_sam/.env
+```
+
+### 2. Memory Management
+
+```bash
+# PHP memory optimization
+echo "memory_limit = 512M" >> /etc/php/8.3/cli/conf.d/99-custom.ini
+
+# OPcache optimization
+echo "opcache.memory_consumption = 256" >> /etc/php/8.3/cli/conf.d/99-custom.ini
+echo "opcache.max_accelerated_files = 20000" >> /etc/php/8.3/cli/conf.d/99-custom.ini
+```
+
+### 3. Database Optimization
+
+```bash
+# MySQL optimization
+echo "innodb_buffer_pool_size = 1G" >> /etc/mysql/mysql.conf.d/mysqld.cnf
+echo "query_cache_size = 128M" >> /etc/mysql/mysql.conf.d/mysqld.cnf
+systemctl restart mysql
+```
+
+## 🤝 Contributing
+
+### Development Setup
+
+```bash
+# Enable debug mode
+export DEBUG=true
+export VERBOSE_LOGGING=true
+
+# Test validation
+./lib/validation.sh
+
+# Test error handling
+./lib/error-handler.sh
+```
+
+### Code Structure
+
+- **lib/shared-functions.sh**: Fungsi-fungsi umum yang digunakan bersama
+- **lib/error-handler.sh**: Error handling dengan rollback mechanism
+- **lib/validation.sh**: Validasi komprehensif untuk berbagai input
+- **config/frankenphp-config.conf**: Konfigurasi sistem yang dapat disesuaikan
+
+### Testing
+
+```bash
+# Test script dengan dry-run
+SKIP_PREFLIGHT_CHECKS=true ./octane-helper-refactored.sh debug
+
+# Test resource calculation
+monitor-server-resources
+
+# Test validation
+echo "test_app" | ./lib/validation.sh validate_app_name
+```
+
+## 📄 License
+
+MIT License - Lihat file LICENSE untuk detail lengkap.
+
+## 🆘 Support
+
+Untuk bantuan dan dukungan:
+
+1. **Documentation**: Baca README ini dengan lengkap
+2. **Debug**: Gunakan `./octane-helper-refactored.sh debug --verbose`
+3. **Monitoring**: Jalankan `monitor-server-resources` untuk analisis
+4. **Logs**: Periksa `/var/log/frankenphp/` untuk error logs
+
+## 🔮 Roadmap
+
+### Version 2.1 (Planned)
+- [ ] Docker support
+- [ ] Kubernetes deployment
+- [ ] Advanced monitoring dashboard
+- [ ] Multi-server deployment
+- [ ] Database clustering
+
+### Version 2.2 (Future)
+- [ ] Web UI management
+- [ ] API endpoints
+- [ ] Webhook integration
+- [ ] Advanced security features
+- [ ] Performance analytics
 
 ---
 
-**Happy Deploying dengan Laravel Octane + FrankenPHP!** 🚀
+**Dibuat dengan ❤️ untuk deployment Laravel yang lebih mudah dan efisien**
