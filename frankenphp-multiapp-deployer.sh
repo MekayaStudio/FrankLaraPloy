@@ -127,6 +127,175 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# =============================================
+# Validation Functions
+# =============================================
+
+# Fungsi untuk validasi domain
+validate_domain() {
+    local domain="$1"
+    
+    # Regex pattern untuk validasi domain
+    # Mendukung: domain.com, sub.domain.com, domain.co.id, localhost, 192.168.1.1
+    local domain_regex="^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$"
+    local ip_regex="^([0-9]{1,3}\.){3}[0-9]{1,3}$"
+    local localhost_regex="^localhost$"
+    
+    # Check if empty
+    if [ -z "$domain" ]; then
+        log_error "Domain tidak boleh kosong!"
+        return 1
+    fi
+    
+    # Check length (max 253 characters)
+    if [ ${#domain} -gt 253 ]; then
+        log_error "Domain terlalu panjang (maksimal 253 karakter)!"
+        return 1
+    fi
+    
+    # Check if localhost
+    if [[ "$domain" =~ $localhost_regex ]]; then
+        log_info "✅ Domain localhost valid"
+        return 0
+    fi
+    
+    # Check if IP address
+    if [[ "$domain" =~ $ip_regex ]]; then
+        # Validate IP octets
+        local valid_ip=true
+        IFS='.' read -ra OCTETS <<< "$domain"
+        for octet in "${OCTETS[@]}"; do
+            if [ $octet -gt 255 ]; then
+                valid_ip=false
+                break
+            fi
+        done
+        
+        if [ "$valid_ip" = true ]; then
+            log_info "✅ IP address $domain valid"
+            return 0
+        else
+            log_error "IP address $domain tidak valid!"
+            return 1
+        fi
+    fi
+    
+    # Check domain format
+    if [[ "$domain" =~ $domain_regex ]]; then
+        log_info "✅ Domain $domain valid"
+        return 0
+    else
+        log_error "Format domain $domain tidak valid!"
+        log_error "Contoh format yang valid:"
+        log_error "  - example.com"
+        log_error "  - subdomain.example.com"
+        log_error "  - example.co.id"
+        log_error "  - localhost"
+        log_error "  - 192.168.1.1"
+        return 1
+    fi
+}
+
+# Fungsi untuk validasi port
+validate_port() {
+    local port="$1"
+    local check_in_use="${2:-true}"
+    
+    # Check if empty
+    if [ -z "$port" ]; then
+        log_error "Port tidak boleh kosong!"
+        return 1
+    fi
+    
+    # Check if numeric
+    if ! [[ "$port" =~ ^[0-9]+$ ]]; then
+        log_error "Port harus berupa angka!"
+        return 1
+    fi
+    
+    # Check port range (1-65535)
+    if [ $port -lt 1 ] || [ $port -gt 65535 ]; then
+        log_error "Port harus dalam range 1-65535!"
+        return 1
+    fi
+    
+    # Warn about privileged ports
+    if [ $port -lt 1024 ]; then
+        log_warning "Port $port adalah privileged port (< 1024), memerlukan akses root"
+    fi
+    
+    # Check if port is in use (if requested)
+    if [ "$check_in_use" = true ]; then
+        if netstat -tuln 2>/dev/null | grep -q ":$port " || ss -tuln 2>/dev/null | grep -q ":$port "; then
+            log_error "Port $port sudah digunakan!"
+            return 1
+        fi
+    fi
+    
+    log_info "✅ Port $port valid dan tersedia"
+    return 0
+}
+
+# Fungsi untuk validasi nama app
+validate_app_name() {
+    local app_name="$1"
+    
+    # Check if empty
+    if [ -z "$app_name" ]; then
+        log_error "Nama app tidak boleh kosong!"
+        return 1
+    fi
+    
+    # Check length (MySQL identifier limit is 64 chars)
+    if [ ${#app_name} -gt 60 ]; then
+        log_error "Nama app terlalu panjang (maksimal 60 karakter)!"
+        return 1
+    fi
+    
+    # Check format (must start with letter, only letters, numbers, underscore)
+    if ! [[ "$app_name" =~ ^[a-zA-Z][a-zA-Z0-9_]*$ ]]; then
+        log_error "Format nama app '$app_name' tidak valid!"
+        log_error "Nama app harus:"
+        log_error "  - Dimulai dengan huruf"
+        log_error "  - Hanya mengandung huruf, angka, dan underscore"
+        log_error "  - Tidak ada spasi atau karakter spesial"
+        log_error ""
+        log_error "Contoh nama yang valid:"
+        log_error "  - web_sam_l12"
+        log_error "  - websaml12"
+        log_error "  - webSamL12"
+        log_error "  - web_app_sam"
+        return 1
+    fi
+    
+    # Check reserved words
+    local reserved_words=("mysql" "root" "admin" "test" "information_schema" "performance_schema" "sys")
+    for reserved in "${reserved_words[@]}"; do
+        if [ "${app_name,,}" = "${reserved,,}" ]; then
+            log_error "Nama app '$app_name' adalah reserved word!"
+            return 1
+        fi
+    done
+    
+    log_info "✅ Nama app '$app_name' valid"
+    return 0
+}
+
+# Fungsi untuk check apakah command exists (idempotent)
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Fungsi untuk check apakah package terinstall (idempotent)
+package_installed() {
+    dpkg -l "$1" 2>/dev/null | grep -q "^ii"
+}
+
+# Fungsi untuk check apakah systemd service exists
+service_exists() {
+    systemctl list-unit-files | grep -q "^$1.service"
+}
+
 # Function to calculate optimal FrankenPHP thread count
 calculate_optimal_threads() {
     local cpu_cores=$(nproc)
@@ -399,81 +568,139 @@ display_resource_warnings() {
 }
 
 # =============================================
-# 1. System Update & Basic Packages
+# 1. System Update & Basic Packages (Idempotent)
 # =============================================
-log_info "Updating system packages..."
-apt update && apt upgrade -y
+log_info "Checking and updating system packages..."
 
-log_info "Installing essential packages..."
-apt install -y \
-    curl \
-    wget \
-    unzip \
-    git \
-    supervisor \
-    ufw \
-    htop \
-    nano \
-    jq \
-    net-tools \
-    software-properties-common \
-    apt-transport-https \
-    ca-certificates \
-    gnupg \
-    lsb-release \
+# Update package list only if it's older than 1 hour
+if [ ! -f /var/lib/apt/periodic/update-success-stamp ] || \
+   [ $(find /var/lib/apt/periodic/update-success-stamp -mmin +60 | wc -l) -gt 0 ]; then
+    log_info "Updating package list..."
+    apt update
+else
+    log_info "Package list is up to date"
+fi
+
+# Upgrade packages only if needed
+if [ $(apt list --upgradable 2>/dev/null | grep -c upgradable) -gt 1 ]; then
+    log_info "Upgrading packages..."
+    apt upgrade -y
+else
+    log_info "All packages are up to date"
+fi
+
+log_info "Installing essential packages (idempotent)..."
+# Install packages only if not already installed
+PACKAGES=(
+    curl
+    wget
+    unzip
+    git
+    supervisor
+    ufw
+    htop
+    nano
+    jq
+    net-tools
+    software-properties-common
+    apt-transport-https
+    ca-certificates
+    gnupg
+    lsb-release
     bc
+)
+
+for package in "${PACKAGES[@]}"; do
+    if ! package_installed "$package"; then
+        log_info "Installing $package..."
+        apt install -y "$package"
+    else
+        log_info "✅ $package already installed"
+    fi
+done
 
 # =============================================
-# 2. Install PHP 8.3+ & Extensions
+# 2. Install PHP 8.3+ & Extensions (Idempotent)
 # =============================================
 log_info "Installing PHP 8.3 and extensions for FrankenPHP..."
-# Note: We don't install php-fpm since FrankenPHP has embedded PHP server
-add-apt-repository -y ppa:ondrej/php
-apt update
 
-apt install -y \
-    php8.3 \
-    php8.3-cli \
-    php8.3-common \
-    php8.3-curl \
-    php8.3-zip \
-    php8.3-gd \
-    php8.3-mysql \
-    php8.3-pgsql \
-    php8.3-sqlite3 \
-    php8.3-xml \
-    php8.3-mbstring \
-    php8.3-bcmath \
-    php8.3-intl \
-    php8.3-redis \
+# Add PHP repository only if not already added
+if ! grep -q "ondrej/php" /etc/apt/sources.list.d/*.list 2>/dev/null; then
+    log_info "Adding PHP repository..."
+    add-apt-repository -y ppa:ondrej/php
+    apt update
+else
+    log_info "✅ PHP repository already added"
+fi
+
+# Install PHP packages only if not already installed
+PHP_PACKAGES=(
+    php8.3
+    php8.3-cli
+    php8.3-common
+    php8.3-curl
+    php8.3-zip
+    php8.3-gd
+    php8.3-mysql
+    php8.3-pgsql
+    php8.3-sqlite3
+    php8.3-xml
+    php8.3-mbstring
+    php8.3-bcmath
+    php8.3-intl
+    php8.3-redis
     php8.3-imagick
+)
+
+for package in "${PHP_PACKAGES[@]}"; do
+    if ! package_installed "$package"; then
+        log_info "Installing $package..."
+        apt install -y "$package"
+    else
+        log_info "✅ $package already installed"
+    fi
+done
 
 # =============================================
-# 3. Install Composer
+# 3. Install Composer (Idempotent)
 # =============================================
-log_info "Installing Composer..."
-curl -sS https://getcomposer.org/installer | php
-mv composer.phar /usr/local/bin/composer
-chmod +x /usr/local/bin/composer
+if ! command_exists composer; then
+    log_info "Installing Composer..."
+    curl -sS https://getcomposer.org/installer | php
+    mv composer.phar /usr/local/bin/composer
+    chmod +x /usr/local/bin/composer
+    log_info "✅ Composer installed successfully"
+else
+    log_info "✅ Composer already installed"
+    composer --version
+fi
 
 # =============================================
-# 4. Install Node.js & npm
+# 4. Install Node.js & npm (Idempotent)
 # =============================================
-log_info "Installing Node.js 20 LTS..."
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-apt install -y nodejs
+if ! command_exists node || [ $(node -v 2>/dev/null | cut -d'v' -f2 | cut -d'.' -f1) -lt 20 ]; then
+    log_info "Installing Node.js 20 LTS..."
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    apt install -y nodejs
+    log_info "✅ Node.js installed successfully"
+else
+    log_info "✅ Node.js already installed"
+    node --version
+    npm --version
+fi
 
 # =============================================
-# 5. Install MySQL
+# 5. Install MySQL (Idempotent)
 # =============================================
-log_info "Installing MySQL 8.0..."
-apt install -y mysql-server
+if ! package_installed mysql-server; then
+    log_info "Installing MySQL 8.0..."
+    apt install -y mysql-server
 
-# Generate root password
-MYSQL_ROOT_PASS="$(openssl rand -base64 32)"
+    # Generate root password
+    MYSQL_ROOT_PASS="$(openssl rand -base64 32)"
 
-# Secure MySQL installation
-mysql_secure_installation <<EOF
+    # Secure MySQL installation
+    mysql_secure_installation <<EOF
 
 y
 2
@@ -485,45 +712,99 @@ y
 y
 EOF
 
-# Save MySQL root credentials
-echo "MYSQL_ROOT_PASS=$MYSQL_ROOT_PASS" > /root/.mysql_credentials
-chmod 600 /root/.mysql_credentials
+    # Save MySQL root credentials
+    echo "MYSQL_ROOT_PASS=$MYSQL_ROOT_PASS" > /root/.mysql_credentials
+    chmod 600 /root/.mysql_credentials
+    log_info "✅ MySQL installed and secured"
+else
+    log_info "✅ MySQL already installed"
+    # Check if credentials file exists
+    if [ ! -f /root/.mysql_credentials ]; then
+        log_warning "⚠️  MySQL credentials file not found!"
+        log_warning "   You may need to manually set MySQL root password"
+    else
+        log_info "✅ MySQL credentials file exists"
+    fi
+fi
 
 # =============================================
-# 6. Install Redis
+# 6. Install Redis (Idempotent)
 # =============================================
-log_info "Installing Redis..."
-apt install -y redis-server
-systemctl enable redis-server
-systemctl start redis-server
-
-# Configure Redis for multi-app usage
-sed -i 's/^# maxmemory <bytes>/maxmemory 512mb/' /etc/redis/redis.conf
-sed -i 's/^# maxmemory-policy noeviction/maxmemory-policy allkeys-lru/' /etc/redis/redis.conf
-systemctl restart redis-server
+if ! package_installed redis-server; then
+    log_info "Installing Redis..."
+    apt install -y redis-server
+    systemctl enable redis-server
+    systemctl start redis-server
+    
+    # Configure Redis for multi-app usage
+    sed -i 's/^# maxmemory <bytes>/maxmemory 512mb/' /etc/redis/redis.conf
+    sed -i 's/^# maxmemory-policy noeviction/maxmemory-policy allkeys-lru/' /etc/redis/redis.conf
+    systemctl restart redis-server
+    log_info "✅ Redis installed and configured"
+else
+    log_info "✅ Redis already installed"
+    # Ensure Redis is running
+    if ! systemctl is-active --quiet redis-server; then
+        log_info "Starting Redis service..."
+        systemctl start redis-server
+    fi
+fi
 
 # =============================================
-# 7. Setup Base Directory Structure
+# 7. Setup Base Directory Structure (Idempotent)
 # =============================================
 log_info "Setting up base directory structure..."
-mkdir -p $APPS_BASE_DIR
-mkdir -p /var/log/frankenphp
-mkdir -p /var/backups/laravel-apps
-mkdir -p /etc/laravel-apps
 
+# Create directories only if they don't exist
+DIRECTORIES=(
+    "$APPS_BASE_DIR"
+    "/var/log/frankenphp"
+    "/var/backups/laravel-apps"
+    "/etc/laravel-apps"
+)
+
+for dir in "${DIRECTORIES[@]}"; do
+    if [ ! -d "$dir" ]; then
+        log_info "Creating directory: $dir"
+        mkdir -p "$dir"
+    else
+        log_info "✅ Directory already exists: $dir"
+    fi
+done
+
+# Set ownership
 chown -R www-data:www-data $APPS_BASE_DIR
 chown -R www-data:www-data /var/log/frankenphp
 chown -R www-data:www-data /var/backups/laravel-apps
 
 # =============================================
-# 8. Configure Firewall
+# 8. Configure Firewall (Idempotent)
 # =============================================
 log_info "Configuring firewall..."
-ufw --force enable
-ufw allow ssh
-ufw allow 80/tcp
-ufw allow 443/tcp
-ufw allow 22/tcp
+
+# Enable firewall if not already enabled
+if ! ufw status | grep -q "Status: active"; then
+    log_info "Enabling firewall..."
+    ufw --force enable
+else
+    log_info "✅ Firewall already enabled"
+fi
+
+# Add rules only if they don't exist
+FIREWALL_RULES=(
+    "22/tcp"
+    "80/tcp"
+    "443/tcp"
+)
+
+for rule in "${FIREWALL_RULES[@]}"; do
+    if ! ufw status | grep -q "$rule"; then
+        log_info "Adding firewall rule: $rule"
+        ufw allow $rule
+    else
+        log_info "✅ Firewall rule already exists: $rule"
+    fi
+done
 
 # =============================================
 # 9. Create FrankenPHP Management Scripts
@@ -535,6 +816,95 @@ cat > /usr/local/bin/create-laravel-app <<'EOF'
 #!/bin/bash
 
 set -e
+
+# Global variables for rollback
+ROLLBACK_NEEDED=false
+CREATED_DATABASE=""
+CREATED_DB_USER=""
+CREATED_APP_DIR=""
+CREATED_CONFIG_FILE=""
+CREATED_SERVICE_FILE=""
+CREATED_SUPERVISOR_FILE=""
+CREATED_CRON_JOBS=""
+CURRENT_APP_NAME=""
+
+# Rollback function
+rollback_deployment() {
+    local app_name="$1"
+
+    if [ "$ROLLBACK_NEEDED" = true ]; then
+        log_error "❌ Deployment failed! Starting rollback for $app_name..."
+
+        # Stop and remove service
+        if [ -n "$CREATED_SERVICE_FILE" ]; then
+            systemctl stop frankenphp-$app_name 2>/dev/null || true
+            systemctl disable frankenphp-$app_name 2>/dev/null || true
+            rm -f "$CREATED_SERVICE_FILE"
+            log_info "✅ Removed service file"
+        fi
+
+        # Remove supervisor config
+        if [ -n "$CREATED_SUPERVISOR_FILE" ]; then
+            rm -f "$CREATED_SUPERVISOR_FILE"
+            supervisorctl reread 2>/dev/null || true
+            supervisorctl update 2>/dev/null || true
+            log_info "✅ Removed supervisor config"
+        fi
+
+        # Remove cron jobs
+        if [ -n "$CREATED_CRON_JOBS" ]; then
+            crontab -u www-data -l 2>/dev/null | grep -v "$app_name" | crontab -u www-data - 2>/dev/null || true
+            log_info "✅ Removed cron jobs"
+        fi
+
+        # Remove database and user
+        if [ -n "$CREATED_DATABASE" ] && [ -n "$CREATED_DB_USER" ]; then
+            source /root/.mysql_credentials 2>/dev/null || true
+            if [ -n "$MYSQL_ROOT_PASS" ]; then
+                mysql -u root -p$MYSQL_ROOT_PASS <<MYSQL_EOF 2>/dev/null || true
+DROP DATABASE IF EXISTS \`$CREATED_DATABASE\`;
+DROP USER IF EXISTS '$CREATED_DB_USER'@'localhost';
+FLUSH PRIVILEGES;
+MYSQL_EOF
+                log_info "✅ Removed database and user"
+            fi
+        fi
+
+        # Remove app directory
+        if [ -n "$CREATED_APP_DIR" ] && [ -d "$CREATED_APP_DIR" ]; then
+            rm -rf "$CREATED_APP_DIR"
+            log_info "✅ Removed app directory"
+        fi
+
+        # Remove config file
+        if [ -n "$CREATED_CONFIG_FILE" ]; then
+            rm -f "$CREATED_CONFIG_FILE"
+            log_info "✅ Removed config file"
+        fi
+
+        systemctl daemon-reload 2>/dev/null || true
+
+        log_info "🔄 Rollback completed for $app_name"
+        exit 1
+    fi
+}
+
+# Error trap function
+error_handler() {
+    local exit_code=$?
+    local line_number=$1
+    log_error "❌ Error occurred at line $line_number (exit code: $exit_code)"
+
+    if [ -n "$CURRENT_APP_NAME" ]; then
+        ROLLBACK_NEEDED=true
+        rollback_deployment "$CURRENT_APP_NAME"
+    fi
+
+    exit $exit_code
+}
+
+# Set up error trap
+trap 'error_handler $LINENO' ERR
 
 if [ $# -lt 2 ]; then
     echo "Usage: $0 <app-name> <domain> [github-repo] [db-name]"
@@ -549,37 +919,137 @@ DOMAIN="$2"
 GITHUB_REPO="$3"
 DB_NAME="${4:-${APP_NAME}_db}"
 
-# Validate app name (should be MySQL compatible)
-if [[ ! "$APP_NAME" =~ ^[a-zA-Z][a-zA-Z0-9_]*$ ]]; then
-    echo "Error: App name '$APP_NAME' contains invalid characters!"
-    echo "App name should:"
-    echo "  - Start with a letter"
-    echo "  - Contain only letters, numbers, and underscores"
-    echo "  - No spaces or special characters"
-    echo ""
-    echo "Examples of valid names:"
-    echo "  - web_sam_l12"
-    echo "  - websaml12"
-    echo "  - webSamL12"
-    echo "  - web_app_sam"
-    exit 1
-fi
-
-APPS_BASE_DIR="/opt/laravel-apps"
-APP_DIR="$APPS_BASE_DIR/$APP_NAME"
-
 # Colors
 GREEN='\033[0;32m'
 RED='\033[0;31m'
+YELLOW='\033[1;33m'
 NC='\033[0m'
 
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
 }
 
+log_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
 log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
+
+# Import validation functions from main script
+source /usr/local/bin/frankenphp-multiapp-deployer.sh 2>/dev/null || true
+
+# If functions not available, define them here
+if ! type validate_app_name &>/dev/null; then
+    validate_app_name() {
+        local app_name="$1"
+        
+        if [ -z "$app_name" ]; then
+            log_error "Nama app tidak boleh kosong!"
+            return 1
+        fi
+        
+        if [ ${#app_name} -gt 60 ]; then
+            log_error "Nama app terlalu panjang (maksimal 60 karakter)!"
+            return 1
+        fi
+        
+        if ! [[ "$app_name" =~ ^[a-zA-Z][a-zA-Z0-9_]*$ ]]; then
+            log_error "Format nama app '$app_name' tidak valid!"
+            log_error "Nama app harus:"
+            log_error "  - Dimulai dengan huruf"
+            log_error "  - Hanya mengandung huruf, angka, dan underscore"
+            log_error "  - Tidak ada spasi atau karakter spesial"
+            log_error ""
+            log_error "Contoh nama yang valid:"
+            log_error "  - web_sam_l12"
+            log_error "  - websaml12"
+            log_error "  - webSamL12"
+            log_error "  - web_app_sam"
+            return 1
+        fi
+        
+        local reserved_words=("mysql" "root" "admin" "test" "information_schema" "performance_schema" "sys")
+        for reserved in "${reserved_words[@]}"; do
+            if [ "${app_name,,}" = "${reserved,,}" ]; then
+                log_error "Nama app '$app_name' adalah reserved word!"
+                return 1
+            fi
+        done
+        
+        log_info "✅ Nama app '$app_name' valid"
+        return 0
+    }
+    
+    validate_domain() {
+        local domain="$1"
+        local domain_regex="^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$"
+        local ip_regex="^([0-9]{1,3}\.){3}[0-9]{1,3}$"
+        local localhost_regex="^localhost$"
+        
+        if [ -z "$domain" ]; then
+            log_error "Domain tidak boleh kosong!"
+            return 1
+        fi
+        
+        if [ ${#domain} -gt 253 ]; then
+            log_error "Domain terlalu panjang (maksimal 253 karakter)!"
+            return 1
+        fi
+        
+        if [[ "$domain" =~ $localhost_regex ]]; then
+            log_info "✅ Domain localhost valid"
+            return 0
+        fi
+        
+        if [[ "$domain" =~ $ip_regex ]]; then
+            local valid_ip=true
+            IFS='.' read -ra OCTETS <<< "$domain"
+            for octet in "${OCTETS[@]}"; do
+                if [ $octet -gt 255 ]; then
+                    valid_ip=false
+                    break
+                fi
+            done
+            
+            if [ "$valid_ip" = true ]; then
+                log_info "✅ IP address $domain valid"
+                return 0
+            else
+                log_error "IP address $domain tidak valid!"
+                return 1
+            fi
+        fi
+        
+        if [[ "$domain" =~ $domain_regex ]]; then
+            log_info "✅ Domain $domain valid"
+            return 0
+        else
+            log_error "Format domain $domain tidak valid!"
+            log_error "Contoh format yang valid:"
+            log_error "  - example.com"
+            log_error "  - subdomain.example.com"
+            log_error "  - example.co.id"
+            log_error "  - localhost"
+            log_error "  - 192.168.1.1"
+            return 1
+        fi
+    }
+fi
+
+# Validate app name
+if ! validate_app_name "$APP_NAME"; then
+    exit 1
+fi
+
+# Validate domain
+if ! validate_domain "$DOMAIN"; then
+    exit 1
+fi
+
+APPS_BASE_DIR="/opt/laravel-apps"
+APP_DIR="$APPS_BASE_DIR/$APP_NAME"
 
 # Function to calculate optimal FrankenPHP thread count
 calculate_optimal_threads() {
@@ -651,8 +1121,12 @@ if [ -n "$GITHUB_REPO" ]; then
     log_info "GitHub Repository: $GITHUB_REPO"
 fi
 
+# Set current app name for rollback
+export CURRENT_APP_NAME="$APP_NAME"
+
 # Create app directory
 mkdir -p $APP_DIR
+CREATED_APP_DIR="$APP_DIR"
 chown www-data:www-data $APP_DIR
 
 # Generate database credentials
@@ -663,7 +1137,15 @@ DB_PASS="$(openssl rand -base64 32)"
 DB_NAME_CLEAN=$(echo $DB_NAME | sed 's/-/_/g')
 
 # Get MySQL root password
+if [ ! -f /root/.mysql_credentials ]; then
+    log_error "MySQL credentials file not found!"
+    log_error "Please run the main deployment script first"
+    exit 1
+fi
 source /root/.mysql_credentials
+
+# Check if database already exists
+DB_EXISTS=$(mysql -u root -p$MYSQL_ROOT_PASS -e "SHOW DATABASES LIKE '$DB_NAME_CLEAN';" 2>/dev/null | grep -c "$DB_NAME_CLEAN" || echo "0")
 
 # Create database and user
 mysql -u root -p$MYSQL_ROOT_PASS <<MYSQL_EOF
@@ -672,6 +1154,12 @@ CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASS';
 GRANT ALL PRIVILEGES ON \`$DB_NAME_CLEAN\`.* TO '$DB_USER'@'localhost';
 FLUSH PRIVILEGES;
 MYSQL_EOF
+
+# Track created database only if it was newly created
+if [ "$DB_EXISTS" = "0" ]; then
+    CREATED_DATABASE="$DB_NAME_CLEAN"
+    CREATED_DB_USER="$DB_USER"
+fi
 
 # Save app configuration
 cat > /etc/laravel-apps/$APP_NAME.conf <<CONFIG_EOF
@@ -683,6 +1171,7 @@ DB_USER=$DB_USER
 DB_PASS=$DB_PASS
 GITHUB_REPO=$GITHUB_REPO
 CONFIG_EOF
+CREATED_CONFIG_FILE="/etc/laravel-apps/$APP_NAME.conf"
 
 # Clone Laravel app from GitHub or create new Laravel project
 if [ -n "$GITHUB_REPO" ]; then
@@ -917,6 +1406,7 @@ ReadWritePaths=$APP_DIR/public/storage
 [Install]
 WantedBy=multi-user.target
 SERVICE_EOF
+CREATED_SERVICE_FILE="/etc/systemd/system/frankenphp-$APP_NAME.service"
 
 # Create supervisor config for queue workers
 cat > /etc/supervisor/conf.d/laravel-worker-$APP_NAME.conf <<SUPERVISOR_EOF
@@ -934,6 +1424,7 @@ redirect_stderr=true
 stdout_logfile=$APP_DIR/storage/logs/worker.log
 stopwaitsecs=3600
 SUPERVISOR_EOF
+CREATED_SUPERVISOR_FILE="/etc/supervisor/conf.d/laravel-worker-$APP_NAME.conf"
 
 # Download FrankenPHP binary if not exists
 if [ ! -f "$APP_DIR/frankenphp" ]; then
@@ -968,6 +1459,7 @@ fi
 
 # Setup cron for Laravel scheduler
 (crontab -u www-data -l 2>/dev/null; echo "* * * * * cd $APP_DIR && php artisan schedule:run >> /dev/null 2>&1") | crontab -u www-data -
+CREATED_CRON_JOBS="$APP_NAME"
 
 # Reload services
 systemctl daemon-reload
@@ -1241,6 +1733,70 @@ APP_NAME="$1"
 ACTION="$2"
 PORT="$3"
 
+# Colors
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+log_info() {
+    echo -e "${GREEN}[INFO]${NC} $1"
+}
+
+log_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Validate port function
+validate_port() {
+    local port="$1"
+    local check_in_use="${2:-true}"
+    
+    if [ -z "$port" ]; then
+        log_error "Port tidak boleh kosong!"
+        return 1
+    fi
+    
+    if ! [[ "$port" =~ ^[0-9]+$ ]]; then
+        log_error "Port harus berupa angka!"
+        return 1
+    fi
+    
+    if [ $port -lt 1 ] || [ $port -gt 65535 ]; then
+        log_error "Port harus dalam range 1-65535!"
+        return 1
+    fi
+    
+    if [ $port -lt 1024 ]; then
+        log_warning "Port $port adalah privileged port (< 1024), memerlukan akses root"
+    fi
+    
+    if [ "$check_in_use" = true ]; then
+        if netstat -tuln 2>/dev/null | grep -q ":$port " || ss -tuln 2>/dev/null | grep -q ":$port "; then
+            log_error "Port $port sudah digunakan!"
+            return 1
+        fi
+    fi
+    
+    log_info "✅ Port $port valid dan tersedia"
+    return 0
+}
+
+# Validate action
+if [ "$ACTION" != "scale-up" ] && [ "$ACTION" != "scale-down" ]; then
+    log_error "Action harus 'scale-up' atau 'scale-down'!"
+    exit 1
+fi
+
+# Validate port
+if ! validate_port "$PORT" "$( [ "$ACTION" = "scale-up" ] && echo "true" || echo "false" )"; then
+    exit 1
+fi
+
 CONFIG_FILE="/etc/laravel-apps/$APP_NAME.conf"
 
 if [ ! -f "$CONFIG_FILE" ]; then
@@ -1305,33 +1861,9 @@ existing_apps=${usage[0]}
 SMART_THREADS=$(calculate_smart_threads $OPTIMAL_THREADS $existing_apps ${resources[0]} ${resources[1]} ${resources[2]})
 OPTIMAL_THREADS=$SMART_THREADS
 
-# Colors
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
-
-log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
 if [ "$ACTION" == "scale-up" ]; then
     # Scale up: Add new instance
     log_info "Scaling up $APP_NAME to port $PORT..."
-
-    # Check if port is already in use
-    if netstat -tuln | grep -q ":$PORT "; then
-        log_error "Port $PORT is already in use!"
-        exit 1
-    fi
 
     # Create new instance directory
     INSTANCE_DIR="$APP_DIR-$PORT"
@@ -2324,8 +2856,13 @@ EOF
 
 chmod +x /usr/local/bin/backup-all-laravel-apps
 
-# Setup daily backup cron
-echo "0 2 * * * /usr/local/bin/backup-all-laravel-apps" | crontab -
+# Setup daily backup cron (idempotent)
+if ! crontab -l 2>/dev/null | grep -q "backup-all-laravel-apps"; then
+    (crontab -l 2>/dev/null; echo "0 2 * * * /usr/local/bin/backup-all-laravel-apps") | crontab -
+    log_info "✅ Daily backup cron job added"
+else
+    log_info "✅ Daily backup cron job already exists"
+fi
 
 # =============================================
 # 11. Final setup
