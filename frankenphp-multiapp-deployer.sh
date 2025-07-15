@@ -1646,8 +1646,68 @@ else
     log_info "   You can manually deploy your Laravel app to: $APP_DIR"
 fi
 
-# Create Caddyfile for this app (Direct domain handling)
-cat > $APP_DIR/Caddyfile <<CADDY_EOF
+# Create Caddyfile for this app
+if [ -f "$APP_DIR/artisan" ]; then
+    # Laravel Octane with reverse proxy
+    cat > $APP_DIR/Caddyfile <<CADDY_EOF
+{
+    # Auto HTTPS will be enabled for real domains
+    auto_https off
+}
+
+# Main domain configuration
+$DOMAIN {
+    encode zstd gzip
+    
+    # Reverse proxy to Laravel Octane
+    reverse_proxy localhost:8000 {
+        header_up Host {http.request.host}
+        header_up X-Real-IP {http.request.remote}
+        header_up X-Forwarded-For {http.request.remote}
+        header_up X-Forwarded-Proto {http.request.scheme}
+        header_up X-Forwarded-Port {http.request.port}
+        
+        # Health check
+        health_uri /health
+        health_interval 30s
+        health_timeout 5s
+        
+        # Fail timeout
+        fail_timeout 30s
+        max_fails 3
+    }
+
+    header {
+        -Server
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy strict-origin-when-cross-origin
+        # Add HSTS for production
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    }
+
+    # Logging
+    log {
+        format json
+        output file /var/log/frankenphp/$APP_NAME.log
+        level INFO
+    }
+
+    # Handle large uploads
+    request_body {
+        max_size 100MB
+    }
+}
+
+# Optional: Redirect www to non-www
+www.$DOMAIN {
+    redir https://$DOMAIN{uri} permanent
+}
+CADDY_EOF
+else
+    # Direct FrankenPHP serving
+    cat > $APP_DIR/Caddyfile <<CADDY_EOF
 {
     frankenphp {
         num_threads $OPTIMAL_THREADS
@@ -1696,9 +1756,51 @@ www.$DOMAIN {
     redir https://$DOMAIN{uri} permanent
 }
 CADDY_EOF
+fi
 
 # Create systemd service
-cat > /etc/systemd/system/frankenphp-$APP_NAME.service <<SERVICE_EOF
+if [ -f "$APP_DIR/artisan" ]; then
+    # Laravel Octane service
+    cat > /etc/systemd/system/frankenphp-$APP_NAME.service <<SERVICE_EOF
+[Unit]
+Description=Laravel Octane FrankenPHP Server for $APP_NAME
+After=network.target mysql.service redis.service
+Wants=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=$APP_DIR
+ExecStart=/usr/bin/php artisan octane:start --server=frankenphp --host=0.0.0.0 --port=8000 --workers=$OPTIMAL_THREADS
+ExecReload=/bin/kill -USR1 \$MAINPID
+KillMode=mixed
+KillSignal=SIGINT
+TimeoutStopSec=10
+Restart=always
+RestartSec=5
+SyslogIdentifier=octane-$APP_NAME
+
+Environment=APP_ENV=production
+Environment=APP_DEBUG=false
+
+LimitNOFILE=65536
+LimitNPROC=32768
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=$APP_DIR/storage
+ReadWritePaths=$APP_DIR/bootstrap/cache
+ReadWritePaths=$APP_DIR/public/storage
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+else
+    # Standalone FrankenPHP service
+    cat > /etc/systemd/system/frankenphp-$APP_NAME.service <<SERVICE_EOF
 [Unit]
 Description=FrankenPHP Web Server for $APP_NAME
 After=network.target mysql.service redis.service
@@ -1735,6 +1837,7 @@ ReadWritePaths=$APP_DIR/public/storage
 [Install]
 WantedBy=multi-user.target
 SERVICE_EOF
+fi
 CREATED_SERVICE_FILE="/etc/systemd/system/frankenphp-$APP_NAME.service"
 
 # Create supervisor config for queue workers
@@ -1755,35 +1858,59 @@ stopwaitsecs=3600
 SUPERVISOR_EOF
 CREATED_SUPERVISOR_FILE="/etc/supervisor/conf.d/laravel-worker-$APP_NAME.conf"
 
-# Download FrankenPHP binary if not exists
-if [ ! -f "$APP_DIR/frankenphp" ]; then
-    log_info "Downloading FrankenPHP binary..."
-    cd $APP_DIR
+# Install Laravel Octane with FrankenPHP
+if [ -f "artisan" ]; then
+    log_info "Installing Laravel Octane with FrankenPHP..."
+    
+    # Install Octane if not already installed
+    if ! grep -q "laravel/octane" composer.json; then
+        log_info "Installing Laravel Octane package..."
+        composer require laravel/octane
+    fi
+    
+    # Install FrankenPHP via Octane (automatically downloads binary)
+    log_info "Installing FrankenPHP via Octane..."
+    php artisan octane:install --server=frankenphp --force
+    
+    # Publish Octane config if needed
+    if [ ! -f "config/octane.php" ]; then
+        php artisan vendor:publish --provider="Laravel\Octane\OctaneServiceProvider" --tag=config
+    fi
+    
+    log_info "✅ Laravel Octane with FrankenPHP installed successfully"
+else
+    log_info "⚠️  No artisan file found, downloading FrankenPHP binary manually..."
+    
+    # Fallback to manual download if not a Laravel project
+    if [ ! -f "$APP_DIR/frankenphp" ]; then
+        log_info "Downloading FrankenPHP binary..."
+        cd $APP_DIR
 
-    # Detect architecture
-    ARCH=$(uname -m)
-    case $ARCH in
-        x86_64)
-            FRANKEN_ARCH="x86_64"
-            ;;
-        aarch64|arm64)
-            FRANKEN_ARCH="aarch64"
-            ;;
-        *)
-            log_error "Unsupported architecture: $ARCH"
-            exit 1
-            ;;
-    esac
+        # Detect architecture
+        ARCH=$(uname -m)
+        case $ARCH in
+            x86_64)
+                FRANKEN_ARCH="x86_64"
+                ;;
+            aarch64|arm64)
+                FRANKEN_ARCH="aarch64"
+                ;;
+            *)
+                log_error "Unsupported architecture: $ARCH"
+                exit 1
+                ;;
+        esac
 
-    # Download latest FrankenPHP
-    FRANKEN_VERSION=$(curl -s https://api.github.com/repos/dunglas/frankenphp/releases/latest | grep -oP '"tag_name": "\K[^"]+')
-    FRANKEN_URL="https://github.com/dunglas/frankenphp/releases/download/${FRANKEN_VERSION}/frankenphp-linux-${FRANKEN_ARCH}"
+        # Download latest FrankenPHP
+        FRANKEN_VERSION=$(curl -s https://api.github.com/repos/dunglas/frankenphp/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+        FRANKEN_URL="https://github.com/dunglas/frankenphp/releases/download/${FRANKEN_VERSION}/frankenphp-linux-${FRANKEN_ARCH}"
 
-    wget -O frankenphp "$FRANKEN_URL"
-    chmod +x frankenphp
-    chown www-data:www-data frankenphp
+        wget -O frankenphp "$FRANKEN_URL"
+        chmod +x frankenphp
+        chown www-data:www-data frankenphp
 
-    log_info "✅ FrankenPHP binary downloaded: $FRANKEN_VERSION"
+        log_info "✅ FrankenPHP binary downloaded: $FRANKEN_VERSION"
+    fi
 fi
 
 # Setup cron for Laravel scheduler
@@ -2346,8 +2473,49 @@ if [ "$ACTION" == "scale-up" ]; then
     cp -r $APP_DIR $INSTANCE_DIR
     chown -R www-data:www-data $INSTANCE_DIR
 
-    # Create Caddyfile for instance (backend only)
-    cat > $INSTANCE_DIR/Caddyfile <<CADDY_EOF
+    # Create service for instance
+    if [ -f "$INSTANCE_DIR/artisan" ]; then
+        # Laravel Octane instance
+        cat > /etc/systemd/system/frankenphp-$APP_NAME-$PORT.service <<SERVICE_EOF
+[Unit]
+Description=Laravel Octane FrankenPHP Server for $APP_NAME Instance Port $PORT
+After=network.target mysql.service redis.service
+Wants=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=$INSTANCE_DIR
+ExecStart=/usr/bin/php artisan octane:start --server=frankenphp --host=0.0.0.0 --port=$PORT --workers=$OPTIMAL_THREADS
+ExecReload=/bin/kill -USR1 \$MAINPID
+KillMode=mixed
+KillSignal=SIGINT
+TimeoutStopSec=10
+Restart=always
+RestartSec=5
+SyslogIdentifier=octane-$APP_NAME-$PORT
+
+Environment=APP_ENV=production
+Environment=APP_DEBUG=false
+
+LimitNOFILE=65536
+LimitNPROC=32768
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=$INSTANCE_DIR/storage
+ReadWritePaths=$INSTANCE_DIR/bootstrap/cache
+ReadWritePaths=$INSTANCE_DIR/public/storage
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+    else
+        # Create Caddyfile for instance (backend only)
+        cat > $INSTANCE_DIR/Caddyfile <<CADDY_EOF
 {
     frankenphp {
         num_threads $OPTIMAL_THREADS
@@ -2390,8 +2558,8 @@ if [ "$ACTION" == "scale-up" ]; then
 }
 CADDY_EOF
 
-    # Create systemd service for instance
-    cat > /etc/systemd/system/frankenphp-$APP_NAME-$PORT.service <<SERVICE_EOF
+        # Standalone FrankenPHP instance
+        cat > /etc/systemd/system/frankenphp-$APP_NAME-$PORT.service <<SERVICE_EOF
 [Unit]
 Description=FrankenPHP Web Server for $APP_NAME Instance Port $PORT
 After=network.target mysql.service redis.service
@@ -2428,11 +2596,80 @@ ReadWritePaths=$INSTANCE_DIR/public/storage
 [Install]
 WantedBy=multi-user.target
 SERVICE_EOF
+    fi
 
     # Update main Caddyfile to include load balancer
-    if ! grep -q "upstream" $APP_DIR/Caddyfile; then
+    if ! grep -q "reverse_proxy" $APP_DIR/Caddyfile || ! grep -q "to localhost:" $APP_DIR/Caddyfile; then
         # First time scaling - convert to load balancer setup
-        cat > $APP_DIR/Caddyfile <<CADDY_EOF
+        if [ -f "$APP_DIR/artisan" ]; then
+            # Laravel Octane load balancer
+            cat > $APP_DIR/Caddyfile <<CADDY_EOF
+{
+    # Auto HTTPS will be enabled for real domains
+    auto_https off
+}
+
+# Load balancer configuration
+$DOMAIN {
+    encode zstd gzip
+
+    reverse_proxy {
+        # Main instance (Laravel Octane port 8000)
+        to localhost:8000
+        # New instance
+        to localhost:$PORT
+
+        # Load balancing method
+        lb_policy round_robin
+
+        # Health checks
+        health_uri /health
+        health_interval 30s
+        health_timeout 5s
+
+        # Fail timeout
+        fail_timeout 30s
+        max_fails 3
+
+        # Headers
+        header_up Host {http.request.host}
+        header_up X-Real-IP {http.request.remote}
+        header_up X-Forwarded-For {http.request.remote}
+        header_up X-Forwarded-Proto {http.request.scheme}
+        header_up X-Forwarded-Port {http.request.port}
+    }
+
+    header {
+        -Server
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy strict-origin-when-cross-origin
+        # Add HSTS for production
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    }
+
+    # Logging
+    log {
+        format json
+        output file /var/log/frankenphp/$APP_NAME-lb.log
+        level INFO
+    }
+
+    # Handle large uploads
+    request_body {
+        max_size 100MB
+    }
+}
+
+# Optional: Redirect www to non-www
+www.$DOMAIN {
+    redir https://$DOMAIN{uri} permanent
+}
+CADDY_EOF
+        else
+            # Standalone FrankenPHP load balancer
+            cat > $APP_DIR/Caddyfile <<CADDY_EOF
 {
     frankenphp {
         num_threads $OPTIMAL_THREADS
@@ -2516,6 +2753,7 @@ www.$DOMAIN {
     }
 }
 CADDY_EOF
+        fi
     else
         # Add new instance to existing load balancer
         sed -i "/# New instance/a\\        to localhost:$PORT" $APP_DIR/Caddyfile
@@ -2554,7 +2792,67 @@ elif [ "$ACTION" == "scale-down" ]; then
     # If no more instances, convert back to direct serve
     if [ $(grep -c "to localhost:" $APP_DIR/Caddyfile) -eq 1 ]; then
         # Only main instance left, convert back to direct serve
-        cat > $APP_DIR/Caddyfile <<CADDY_EOF
+        if [ -f "$APP_DIR/artisan" ]; then
+            # Laravel Octane direct serve
+            cat > $APP_DIR/Caddyfile <<CADDY_EOF
+{
+    # Auto HTTPS will be enabled for real domains
+    auto_https off
+}
+
+# Main domain configuration
+$DOMAIN {
+    encode zstd gzip
+    
+    # Reverse proxy to Laravel Octane
+    reverse_proxy localhost:8000 {
+        header_up Host {http.request.host}
+        header_up X-Real-IP {http.request.remote}
+        header_up X-Forwarded-For {http.request.remote}
+        header_up X-Forwarded-Proto {http.request.scheme}
+        header_up X-Forwarded-Port {http.request.port}
+        
+        # Health check
+        health_uri /health
+        health_interval 30s
+        health_timeout 5s
+        
+        # Fail timeout
+        fail_timeout 30s
+        max_fails 3
+    }
+
+    header {
+        -Server
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy strict-origin-when-cross-origin
+        # Add HSTS for production
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    }
+
+    # Logging
+    log {
+        format json
+        output file /var/log/frankenphp/$APP_NAME.log
+        level INFO
+    }
+
+    # Handle large uploads
+    request_body {
+        max_size 100MB
+    }
+}
+
+# Optional: Redirect www to non-www
+www.$DOMAIN {
+    redir https://$DOMAIN{uri} permanent
+}
+CADDY_EOF
+        else
+            # Standalone FrankenPHP direct serve
+            cat > $APP_DIR/Caddyfile <<CADDY_EOF
 {
     frankenphp {
         num_threads $OPTIMAL_THREADS
@@ -2603,6 +2901,7 @@ www.$DOMAIN {
     redir https://$DOMAIN{uri} permanent
 }
 CADDY_EOF
+        fi
     fi
 
     # Restart main service
@@ -3739,6 +4038,14 @@ log_info "  scale-laravel-app <name> <scale-up|scale-down> <port>"
 log_info "  status-laravel-app <name>"
 log_info "  backup-all-laravel-apps"
 log_info ""
+log_info "🔥 Laravel Octane Helper (octane-helper.sh):"
+log_info "  octane-helper.sh install [directory]     - Install Laravel Octane with FrankenPHP"
+log_info "  octane-helper.sh configure [directory]   - Configure existing Laravel app for Octane"
+log_info "  octane-helper.sh start [directory]       - Start Laravel Octane server"
+log_info "  octane-helper.sh stop [directory]        - Stop Laravel Octane server"
+log_info "  octane-helper.sh status [directory]      - Check Octane server status"
+log_info "  octane-helper.sh optimize [directory]    - Optimize Laravel app for Octane"
+log_info ""
 log_info "🔍 Resource Monitoring & Optimization:"
 log_info "  monitor-server-resources             - Real-time server resource monitoring"
 log_info "  analyze-app-resources                - Detailed app resource analysis"
@@ -3749,6 +4056,12 @@ log_info "🎯 Example usage:"
 log_info "  create-laravel-app web_sam testingsetup.rizqis.com https://github.com/CompleteLabs/web-app-sam.git"
 log_info "  create-laravel-app web_crm_app crm.completelabs.com https://github.com/user/laravel-crm.git"
 log_info "  create-laravel-app web_api_service api.completelabs.com"
+log_info ""
+log_info "🔥 Laravel Octane examples:"
+log_info "  ./octane-helper.sh install /opt/laravel-apps/web_sam"
+log_info "  ./octane-helper.sh configure ."
+log_info "  ./octane-helper.sh start"
+log_info "  ./octane-helper.sh optimize /var/www/laravel-app"
 log_info ""
 log_info "📝 App naming rules:"
 log_info "  - Use underscores instead of dashes (web_sam not web-sam)"
@@ -3772,17 +4085,22 @@ log_info ""
 log_info "🔐 MySQL root password saved in: /root/.mysql_credentials"
 log_info "🎉 Ready for FrankenPHP multi-app deployment!"
 log_info ""
-log_info "🚀 FrankenPHP Benefits:"
-log_info "  - ⚡ Embedded PHP server (no PHP-FPM needed)"
-log_info "  - 🌐 Built-in Caddy web server"
+log_info "🚀 FrankenPHP + Laravel Octane Benefits:"
+log_info "  - ⚡ Laravel Octane with FrankenPHP server (automatic binary download)"
+log_info "  - 🌐 Built-in Caddy web server with reverse proxy"
 log_info "  - 🔒 Auto HTTPS with Let's Encrypt"
 log_info "  - 📈 Horizontal scaling with load balancer"
-log_info "  - 🔧 Direct domain handling"
-log_info "  - 🎯 Simpler architecture"
-log_info "  - 🚀 Better performance"
-log_info "  - 📦 GitHub integration"
+log_info "  - 🔧 Smart deployment detection (Octane vs standalone)"
+log_info "  - 🎯 Optimized Laravel performance"
+log_info "  - 🚀 Better memory management with workers"
+log_info "  - 📦 GitHub integration with automatic Octane setup"
 log_info "  - 🔄 Zero-downtime deployment"
-log_info "  - 🧠 Dynamic thread optimization (CPU: $(nproc) cores → $OPTIMAL_THREADS threads)"
+log_info "  - 🧠 Dynamic worker optimization (CPU: $(nproc) cores → $OPTIMAL_THREADS workers)"
+log_info ""
+log_info "🎭 Deployment Modes:"
+log_info "  - 🔥 Laravel Apps: Automatically use Laravel Octane with FrankenPHP"
+log_info "  - 📁 Non-Laravel Apps: Fallback to standalone FrankenPHP"
+log_info "  - 🔄 Mixed Environment: Support both modes simultaneously"
 log_info ""
 log_info "🔍 Resource Awareness System Benefits:"
 log_info "  - 🛡️  Pre-flight checks prevent resource overcommitment"
