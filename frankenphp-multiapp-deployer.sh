@@ -1904,14 +1904,9 @@ Environment=APP_DEBUG=false
 LimitNOFILE=65536
 LimitNPROC=32768
 
-# Security settings - relaxed for compatibility
-NoNewPrivileges=false
-PrivateTmp=false
-PrivateDevices=false
-ProtectSystem=false
-ProtectHome=false
-ReadWritePaths=$APP_DIR /tmp /var/log/frankenphp
-ReadOnlyPaths=/etc/laravel-apps
+# Security settings - disabled to prevent namespace conflicts
+# NoNewPrivileges, PrivateTmp, ProtectSystem, ProtectHome disabled
+# to avoid systemd namespace issues (exit code 226/NAMESPACE)
 
 [Install]
 WantedBy=multi-user.target
@@ -1945,14 +1940,9 @@ Environment=APP_DEBUG=false
 LimitNOFILE=65536
 LimitNPROC=32768
 
-# Security settings - relaxed for compatibility
-NoNewPrivileges=false
-PrivateTmp=false
-PrivateDevices=false
-ProtectSystem=false
-ProtectHome=false
-ReadWritePaths=$APP_DIR /tmp /var/log/frankenphp
-ReadOnlyPaths=/etc/laravel-apps
+# Security settings - disabled to prevent namespace conflicts
+# NoNewPrivileges, PrivateTmp, ProtectSystem, ProtectHome disabled
+# to avoid systemd namespace issues (exit code 226/NAMESPACE)
 
 [Install]
 WantedBy=multi-user.target
@@ -2709,14 +2699,9 @@ Environment=APP_DEBUG=false
 LimitNOFILE=65536
 LimitNPROC=32768
 
-# Security settings - relaxed for compatibility
-NoNewPrivileges=false
-PrivateTmp=false
-PrivateDevices=false
-ProtectSystem=false
-ProtectHome=false
-ReadWritePaths=$INSTANCE_DIR /tmp /var/log/frankenphp
-ReadOnlyPaths=/etc/laravel-apps
+# Security settings - disabled to prevent namespace conflicts
+# NoNewPrivileges, PrivateTmp, ProtectSystem, ProtectHome disabled
+# to avoid systemd namespace issues (exit code 226/NAMESPACE)
 
 [Install]
 WantedBy=multi-user.target
@@ -2794,14 +2779,9 @@ Environment=APP_DEBUG=false
 LimitNOFILE=65536
 LimitNPROC=32768
 
-# Security settings - relaxed for compatibility
-NoNewPrivileges=false
-PrivateTmp=false
-PrivateDevices=false
-ProtectSystem=false
-ProtectHome=false
-ReadWritePaths=$INSTANCE_DIR /tmp /var/log/frankenphp
-ReadOnlyPaths=/etc/laravel-apps
+# Security settings - disabled to prevent namespace conflicts
+# NoNewPrivileges, PrivateTmp, ProtectSystem, ProtectHome disabled
+# to avoid systemd namespace issues (exit code 226/NAMESPACE)
 
 [Install]
 WantedBy=multi-user.target

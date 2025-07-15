@@ -86,6 +86,12 @@ show_help() {
     echo "  db:list                     - List semua apps dan status database"
     echo "  db:status                   - Check MySQL service status"
     echo ""
+    echo "🔧 Systemd Commands:"
+    echo "  systemd:fix <service>       - Fix systemd namespace issues (exit code 226)"
+    echo "  systemd:fix-all             - Fix all frankenphp services namespace issues"
+    echo "  systemd:check <service>     - Check service status dan logs"
+    echo "  systemd:list                - List all frankenphp services"
+    echo ""
     echo "Examples:"
     echo "  $0 setup                                    # Setup sistem"
     echo "  $0 install web_sam example.com             # Install app tanpa repo"
@@ -1069,6 +1075,194 @@ quick_setup_and_install() {
 }
 
 # =============================================
+# Systemd Functions
+# =============================================
+
+systemd_check_service() {
+    local service_name="$1"
+    
+    if [ -z "$service_name" ]; then
+        log_error "Service name is required"
+        return 1
+    fi
+    
+    log_info "Checking service status: $service_name"
+    
+    # Check if service exists
+    if ! systemctl list-unit-files | grep -q "^$service_name.service"; then
+        log_error "Service $service_name not found"
+        return 1
+    fi
+    
+    # Show service status
+    echo ""
+    log_info "📊 Service Status:"
+    systemctl status "$service_name" --no-pager || true
+    
+    # Show recent logs
+    echo ""
+    log_info "📋 Recent Logs:"
+    journalctl -u "$service_name" -n 10 --no-pager || true
+    
+    # Check for namespace issues
+    if journalctl -u "$service_name" -n 20 --no-pager | grep -q "226/NAMESPACE"; then
+        log_warning "⚠️  Namespace issues detected (exit code 226/NAMESPACE)"
+        log_info "Fix dengan: $0 systemd:fix $service_name"
+        return 1
+    else
+        log_info "✅ No namespace issues detected"
+        return 0
+    fi
+}
+
+systemd_fix_service() {
+    local service_name="$1"
+    
+    if [ -z "$service_name" ]; then
+        log_error "Service name is required"
+        return 1
+    fi
+    
+    log_info "Fixing namespace issues for service: $service_name"
+    
+    local service_file="/etc/systemd/system/$service_name.service"
+    
+    # Check if service file exists
+    if [ ! -f "$service_file" ]; then
+        log_error "Service file not found: $service_file"
+        return 1
+    fi
+    
+    # Create backup
+    cp "$service_file" "$service_file.backup"
+    log_info "✅ Backup created: $service_file.backup"
+    
+    # Remove problematic security settings
+    log_info "Removing problematic security settings..."
+    
+    # Remove the security settings that cause namespace issues
+    sed -i '/^NoNewPrivileges=/d' "$service_file"
+    sed -i '/^PrivateTmp=/d' "$service_file"
+    sed -i '/^PrivateDevices=/d' "$service_file"
+    sed -i '/^ProtectSystem=/d' "$service_file"
+    sed -i '/^ProtectHome=/d' "$service_file"
+    sed -i '/^ReadWritePaths=/d' "$service_file"
+    sed -i '/^ReadOnlyPaths=/d' "$service_file"
+    
+    # Add comment about why security settings are disabled
+    sed -i '/^# Resource limits/a\\n# Security settings - disabled to prevent namespace conflicts\n# NoNewPrivileges, PrivateTmp, ProtectSystem, ProtectHome disabled\n# to avoid systemd namespace issues (exit code 226/NAMESPACE)' "$service_file"
+    
+    log_info "✅ Security settings removed from service file"
+    
+    # Reload systemd
+    systemctl daemon-reload
+    log_info "✅ Systemd daemon reloaded"
+    
+    # Restart service
+    log_info "Restarting service..."
+    systemctl restart "$service_name"
+    
+    # Check if service is now running
+    sleep 2
+    if systemctl is-active --quiet "$service_name"; then
+        log_info "✅ Service $service_name is now running successfully"
+        
+        # Show status
+        echo ""
+        log_info "📊 Updated Service Status:"
+        systemctl status "$service_name" --no-pager -l
+        
+        return 0
+    else
+        log_error "❌ Service $service_name failed to start"
+        
+        # Show logs
+        echo ""
+        log_info "📋 Error Logs:"
+        journalctl -u "$service_name" -n 10 --no-pager
+        
+        return 1
+    fi
+}
+
+systemd_fix_all_services() {
+    log_info "Fixing namespace issues for all frankenphp services..."
+    
+    local services_fixed=0
+    local services_failed=0
+    
+    # Find all frankenphp services
+    for service_file in /etc/systemd/system/frankenphp-*.service; do
+        if [ -f "$service_file" ]; then
+            local service_name=$(basename "$service_file" .service)
+            
+            echo ""
+            log_info "🔧 Fixing service: $service_name"
+            
+            if systemd_fix_service "$service_name"; then
+                ((services_fixed++))
+            else
+                ((services_failed++))
+            fi
+        fi
+    done
+    
+    echo ""
+    log_info "📊 Summary:"
+    log_info "Services fixed: $services_fixed"
+    if [ $services_failed -gt 0 ]; then
+        log_warning "Services failed: $services_failed"
+    fi
+    
+    if [ $services_fixed -gt 0 ]; then
+        log_info "✅ Namespace issues fixed for $services_fixed services"
+    else
+        log_info "No frankenphp services found to fix"
+    fi
+}
+
+systemd_list_services() {
+    log_info "📋 Listing all frankenphp services..."
+    
+    local services_found=0
+    
+    for service_file in /etc/systemd/system/frankenphp-*.service; do
+        if [ -f "$service_file" ]; then
+            services_found=1
+            local service_name=$(basename "$service_file" .service)
+            
+            echo ""
+            log_info "📱 Service: $service_name"
+            
+            # Check status
+            if systemctl is-active --quiet "$service_name"; then
+                echo "  Status: ✅ Running"
+            else
+                echo "  Status: ❌ Not running"
+                
+                # Check for namespace issues
+                if journalctl -u "$service_name" -n 5 --no-pager | grep -q "226/NAMESPACE"; then
+                    echo "  Issue: ⚠️  Namespace conflict detected"
+                fi
+            fi
+            
+            # Show service file path
+            echo "  File: $service_file"
+            
+            # Show working directory
+            local working_dir=$(grep "^WorkingDirectory=" "$service_file" | cut -d'=' -f2)
+            if [ -n "$working_dir" ]; then
+                echo "  Directory: $working_dir"
+            fi
+        fi
+    done
+    
+    if [ $services_found -eq 0 ]; then
+        log_info "No frankenphp services found."
+    fi
+}
+
+# =============================================
 # Main Command Router
 # =============================================
 
@@ -1173,6 +1367,33 @@ main() {
             ;;
         "db:status")
             mysql_status
+            ;;
+            
+        # Systemd commands
+        "systemd:fix")
+            if [ -z "$2" ]; then
+                log_error "Service name diperlukan"
+                log_info "Usage: $0 systemd:fix <service_name>"
+                exit 1
+            fi
+            systemd_fix_service "$2"
+            ;;
+            
+        "systemd:fix-all")
+            systemd_fix_all_services
+            ;;
+            
+        "systemd:check")
+            if [ -z "$2" ]; then
+                log_error "Service name diperlukan"
+                log_info "Usage: $0 systemd:check <service_name>"
+                exit 1
+            fi
+            systemd_check_service "$2"
+            ;;
+            
+        "systemd:list")
+            systemd_list_services
             ;;
             
         # Quick commands

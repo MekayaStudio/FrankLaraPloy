@@ -161,18 +161,25 @@ tail -f /var/log/frankenphp/web_sam.log
 ./install.sh monitor
 ```
 
-### Systemd Security Conflicts
+### Systemd Namespace Issues (Exit Code 226/NAMESPACE)
 
-Jika ada konflik dengan pengaturan systemd, edit `config/frankenphp-config.conf`:
+Jika service gagal dengan error `status=226/NAMESPACE`:
 
 ```bash
-# Matikan strict security untuk kompatibilitas
-SYSTEMD_STRICT_SECURITY=false
-SYSTEMD_PRIVATE_TMP=false
-SYSTEMD_PRIVATE_DEVICES=false
-SYSTEMD_PROTECT_SYSTEM=false
-SYSTEMD_PROTECT_HOME=false
+# Fix service tertentu
+./install.sh systemd:fix frankenphp-testing
+
+# Fix semua frankenphp services
+./install.sh systemd:fix-all
+
+# Check service status dan logs
+./install.sh systemd:check frankenphp-testing
+
+# List all frankenphp services
+./install.sh systemd:list
 ```
+
+**📋 Dokumentasi lengkap**: Lihat `SYSTEMD_NAMESPACE_FIX.md`
 
 ### Database Access Problems
 

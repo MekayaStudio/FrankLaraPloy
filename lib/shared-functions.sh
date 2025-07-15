@@ -700,26 +700,12 @@ generate_systemd_security() {
     security_settings+="LimitNOFILE=${SYSTEMD_LIMIT_NOFILE:-65536}\n"
     security_settings+="LimitNPROC=${SYSTEMD_LIMIT_NPROC:-32768}\n\n"
     
-    # Add security settings based on configuration
-    if [ "${SYSTEMD_STRICT_SECURITY:-false}" = "true" ]; then
-        security_settings+="# Security settings - strict mode\n"
-        security_settings+="NoNewPrivileges=true\n"
-        security_settings+="PrivateTmp=true\n"
-        security_settings+="PrivateDevices=true\n"
-        security_settings+="ProtectSystem=strict\n"
-        security_settings+="ProtectHome=true\n"
-        security_settings+="ReadWritePaths=$app_dir /tmp /var/log/frankenphp\n"
-        security_settings+="ReadOnlyPaths=/etc/laravel-apps\n"
-    else
-        security_settings+="# Security settings - relaxed for compatibility\n"
-        security_settings+="NoNewPrivileges=${SYSTEMD_NO_NEW_PRIVILEGES:-false}\n"
-        security_settings+="PrivateTmp=${SYSTEMD_PRIVATE_TMP:-false}\n"
-        security_settings+="PrivateDevices=${SYSTEMD_PRIVATE_DEVICES:-false}\n"
-        security_settings+="ProtectSystem=${SYSTEMD_PROTECT_SYSTEM:-false}\n"
-        security_settings+="ProtectHome=${SYSTEMD_PROTECT_HOME:-false}\n"
-        security_settings+="ReadWritePaths=$app_dir /tmp /var/log/frankenphp\n"
-        security_settings+="ReadOnlyPaths=/etc/laravel-apps\n"
-    fi
+    # Security settings - disabled to prevent namespace conflicts
+    # NoNewPrivileges, PrivateTmp, ProtectSystem, ProtectHome disabled
+    # to avoid systemd namespace issues (exit code 226/NAMESPACE)
+    security_settings+="# Security settings - disabled to prevent namespace conflicts\n"
+    security_settings+="# NoNewPrivileges, PrivateTmp, ProtectSystem, ProtectHome disabled\n"
+    security_settings+="# to avoid systemd namespace issues (exit code 226/NAMESPACE)\n"
     
     echo -e "$security_settings"
 }

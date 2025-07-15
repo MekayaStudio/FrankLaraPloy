@@ -403,10 +403,27 @@ tar -xzf web_sam_app.tar.gz -C /opt/laravel-apps/web_sam/
 
 ### Common Issues
 
-**1. FrankenPHP Binary Not Found**
+**1. Systemd Namespace Issues (Exit Code 226/NAMESPACE)**
+
+Jika service gagal dengan error `status=226/NAMESPACE`, gunakan fix script:
+
+```bash
+# Fix service tertentu
+sudo ./fix-systemd-namespace.sh fix frankenphp-testing
+
+# Fix semua frankenphp services
+sudo ./fix-systemd-namespace.sh fix-all
+
+# Check status service
+sudo ./fix-systemd-namespace.sh check frankenphp-testing
+```
+
+**📋 Dokumentasi lengkap**: Lihat `SYSTEMD_NAMESPACE_FIX.md`
+
+**2. FrankenPHP Binary Not Found**
 ```bash
 # Debug installation
-./octane-helper-refactored.sh debug
+./install.sh debug
 
 # Manual download
 cd /opt/laravel-apps/web_sam
