@@ -145,14 +145,14 @@ graph TB
 Proses deployment dirancang agar aman dengan pre-flight check dan rollback otomatis.
 ```mermaid
 graph TD
-    A["Start: create-laravel-app"] --> B["1. Resource Check"]
+    A["Start: create-laravel-app"] --> B["Resource Check"]
     B --> C{"Cukup?"}
     C -->|Tidak| D["Gagal & Exit"]
-    C -->|Ya| E["2. Setup App & DB"]
-    E --> F["3. Clone Repo & Install Deps"]
-    F --> G["4. Konfigurasi Service & Caddy"]
+    C -->|Ya| E["Setup App & DB"]
+    E --> F["Clone Repo & Install Deps"]
+    F --> G["Konfigurasi Service & Caddy"]
     G --> H{"Sukses?"}
-    H -->|Tidak| I["5. Rollback Otomatis"]
+    H -->|Tidak| I["Rollback Otomatis"]
     H -->|Ya| J["✅ Selesai"]
 ```
 
