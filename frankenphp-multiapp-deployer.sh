@@ -159,26 +159,59 @@ validate_domain() {
         return 0
     fi
     
-    # Check if IP address
-    if [[ "$domain" =~ $ip_regex ]]; then
-        # Validate IP octets
-        local valid_ip=true
-        IFS='.' read -ra OCTETS <<< "$domain"
-        for octet in "${OCTETS[@]}"; do
-            if [ $octet -gt 255 ]; then
-                valid_ip=false
-                break
+            # Check if IP address (only digits and dots)
+        if [[ "$domain" =~ ^[0-9.]+$ ]]; then
+            # Count dots - should be exactly 3
+            local dot_count=$(echo "$domain" | tr -cd '.' | wc -c)
+            if [ $dot_count -eq 3 ]; then
+                # Validate IP octets
+                local valid_ip=true
+                IFS='.' read -ra OCTETS <<< "$domain"
+                
+                # Check exactly 4 octets
+                if [ ${#OCTETS[@]} -ne 4 ]; then
+                    log_error "IP address $domain tidak valid!"
+                    return 1
+                fi
+                
+                for octet in "${OCTETS[@]}"; do
+                    # Check if octet is empty
+                    if [ -z "$octet" ]; then
+                        valid_ip=false
+                        break
+                    fi
+                    
+                    # Check if octet is numeric
+                    if ! [[ "$octet" =~ ^[0-9]+$ ]]; then
+                        valid_ip=false
+                        break
+                    fi
+                    
+                    # Check if octet is in valid range (0-255)
+                    if [ $octet -gt 255 ]; then
+                        valid_ip=false
+                        break
+                    fi
+                    
+                    # Check for leading zeros (except for "0" itself)
+                    if [ ${#octet} -gt 1 ] && [ "${octet:0:1}" = "0" ]; then
+                        valid_ip=false
+                        break
+                    fi
+                done
+                
+                if [ "$valid_ip" = true ]; then
+                    log_info "✅ IP address $domain valid"
+                    return 0
+                else
+                    log_error "IP address $domain tidak valid!"
+                    return 1
+                fi
+            else
+                log_error "IP address $domain tidak valid!"
+                return 1
             fi
-        done
-        
-        if [ "$valid_ip" = true ]; then
-            log_info "✅ IP address $domain valid"
-            return 0
-        else
-            log_error "IP address $domain tidak valid!"
-            return 1
         fi
-    fi
     
     # Check domain format
     if [[ "$domain" =~ $domain_regex ]]; then
@@ -696,8 +729,8 @@ if ! package_installed mysql-server; then
     log_info "Installing MySQL 8.0..."
     apt install -y mysql-server
 
-    # Generate root password
-    MYSQL_ROOT_PASS="$(openssl rand -base64 32)"
+    # Generate root password with only alphanumeric characters
+    MYSQL_ROOT_PASS="$(openssl rand -base64 32 | tr -d '/+=\n' | head -c 32)"
 
     # Secure MySQL installation
     mysql_secure_installation <<EOF
@@ -1236,19 +1269,54 @@ if ! type validate_app_name &>/dev/null; then
             return 0
         fi
         
-        if [[ "$domain" =~ $ip_regex ]]; then
-            local valid_ip=true
-            IFS='.' read -ra OCTETS <<< "$domain"
-            for octet in "${OCTETS[@]}"; do
-                if [ $octet -gt 255 ]; then
-                    valid_ip=false
-                    break
+        # Check if IP address (only digits and dots)
+        if [[ "$domain" =~ ^[0-9.]+$ ]]; then
+            # Count dots - should be exactly 3
+            local dot_count=$(echo "$domain" | tr -cd '.' | wc -c)
+            if [ $dot_count -eq 3 ]; then
+                # Validate IP octets
+                local valid_ip=true
+                IFS='.' read -ra OCTETS <<< "$domain"
+                
+                # Check exactly 4 octets
+                if [ ${#OCTETS[@]} -ne 4 ]; then
+                    log_error "IP address $domain tidak valid!"
+                    return 1
                 fi
-            done
-            
-            if [ "$valid_ip" = true ]; then
-                log_info "✅ IP address $domain valid"
-                return 0
+                
+                for octet in "${OCTETS[@]}"; do
+                    # Check if octet is empty
+                    if [ -z "$octet" ]; then
+                        valid_ip=false
+                        break
+                    fi
+                    
+                    # Check if octet is numeric
+                    if ! [[ "$octet" =~ ^[0-9]+$ ]]; then
+                        valid_ip=false
+                        break
+                    fi
+                    
+                    # Check if octet is in valid range (0-255)
+                    if [ $octet -gt 255 ]; then
+                        valid_ip=false
+                        break
+                    fi
+                    
+                    # Check for leading zeros (except for "0" itself)
+                    if [ ${#octet} -gt 1 ] && [ "${octet:0:1}" = "0" ]; then
+                        valid_ip=false
+                        break
+                    fi
+                done
+                
+                if [ "$valid_ip" = true ]; then
+                    log_info "✅ IP address $domain valid"
+                    return 0
+                else
+                    log_error "IP address $domain tidak valid!"
+                    return 1
+                fi
             else
                 log_error "IP address $domain tidak valid!"
                 return 1
@@ -1364,7 +1432,8 @@ chown www-data:www-data $APP_DIR
 
 # Generate database credentials
 DB_USER="${APP_NAME}_user"
-DB_PASS="$(openssl rand -base64 32)"
+# Generate password with only alphanumeric characters to avoid sed issues
+DB_PASS="$(openssl rand -base64 32 | tr -d '/+=\n' | head -c 32)"
 
 # Clean DB_NAME to be MySQL compatible (replace - with _)
 DB_NAME_CLEAN=$(echo $DB_NAME | sed 's/-/_/g')
@@ -1484,10 +1553,37 @@ ENV_EOF
 
     # Update database credentials in .env
     log_info "Updating database credentials in .env..."
-    sed -i "s/DB_DATABASE=.*/DB_DATABASE=$DB_NAME_CLEAN/" .env
-    sed -i "s/DB_USERNAME=.*/DB_USERNAME=$DB_USER/" .env
-    sed -i "s/DB_PASSWORD=.*/DB_PASSWORD=$DB_PASS/" .env
-    sed -i "s|APP_URL=.*|APP_URL=https://$DOMAIN|" .env
+    # Use a safer approach to update .env file to handle special characters in password
+    
+    # Create a backup of original .env
+    cp .env .env.backup
+    
+    # Use a safe method to update .env file
+    {
+        # Read the original .env file and update values
+        while IFS= read -r line; do
+            case "$line" in
+                DB_DATABASE=*)
+                    echo "DB_DATABASE=$DB_NAME_CLEAN"
+                    ;;
+                DB_USERNAME=*)
+                    echo "DB_USERNAME=$DB_USER"
+                    ;;
+                DB_PASSWORD=*)
+                    echo "DB_PASSWORD=$DB_PASS"
+                    ;;
+                APP_URL=*)
+                    echo "APP_URL=https://$DOMAIN"
+                    ;;
+                *)
+                    echo "$line"
+                    ;;
+            esac
+        done < .env.backup
+    } > .env
+    
+    # Remove backup file
+    rm -f .env.backup
 
     # Install dependencies if composer.json exists
     if [ -f "composer.json" ]; then
