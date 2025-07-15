@@ -44,6 +44,7 @@ show_help() {
     echo "  stop [directory]        - Stop Laravel Octane server"
     echo "  status [directory]      - Check Octane server status"
     echo "  optimize [directory]    - Optimize Laravel app for Octane"
+    echo "  debug [directory]       - Debug Octane installation"
     echo "  help                    - Show this help message"
     echo ""
     echo "Examples:"
@@ -51,6 +52,7 @@ show_help() {
     echo "  $0 configure ."
     echo "  $0 start"
     echo "  $0 optimize /var/www/laravel-app"
+    echo "  $0 debug                              # Debug installation issues"
     echo ""
 }
 
@@ -88,21 +90,63 @@ install_octane() {
         log_info "✅ Laravel Octane sudah terinstal"
     else
         log_info "📦 Menginstal Laravel Octane package..."
-        composer require laravel/octane
+        if ! composer require laravel/octane; then
+            log_error "Gagal menginstal Laravel Octane package"
+            log_error "Pastikan:"
+            log_error "  - Koneksi internet stabil"
+            log_error "  - Composer sudah terinstal"
+            log_error "  - PHP version kompatibel (8.1+)"
+            return 1
+        fi
+        log_info "✅ Laravel Octane package berhasil diinstal"
     fi
     
     # Install FrankenPHP via Octane
-    log_info "⬇️  Menginstal FrankenPHP via Octane..."
-    php artisan octane:install --server=frankenphp --force
+    log_info "⬇️  Menginstal FrankenPHP via Laravel Octane..."
+    log_info "Ini akan otomatis mendownload FrankenPHP binary yang sesuai dengan sistem Anda"
+    
+    # Run octane:install with proper error handling
+    if php artisan octane:install --server=frankenphp --force; then
+        log_info "✅ FrankenPHP berhasil diinstal via Laravel Octane"
+    else
+        log_error "Gagal menginstal FrankenPHP via Laravel Octane"
+        log_error "Kemungkinan penyebab:"
+        log_error "  - Koneksi internet bermasalah"
+        log_error "  - GitHub API rate limit"
+        log_error "  - Arsitektur sistem tidak didukung"
+        log_error "  - Tidak ada akses write ke direktori"
+        return 1
+    fi
     
     # Publish Octane config
     if [ ! -f "config/octane.php" ]; then
         log_info "📝 Mempublish konfigurasi Octane..."
-        php artisan vendor:publish --provider="Laravel\Octane\OctaneServiceProvider" --tag=config
+        if php artisan vendor:publish --provider="Laravel\Octane\OctaneServiceProvider" --tag=config; then
+            log_info "✅ Konfigurasi Octane berhasil dipublish"
+        else
+            log_warning "⚠️  Gagal mempublish konfigurasi Octane"
+        fi
+    else
+        log_info "✅ Konfigurasi Octane sudah ada"
+    fi
+    
+    # Verify installation
+    if [ -f "frankenphp" ]; then
+        log_info "✅ FrankenPHP binary ditemukan di direktori app"
+        chmod +x frankenphp
+        # Check if we can get version
+        if ./frankenphp version >/dev/null 2>&1; then
+            FRANKEN_VERSION=$(./frankenphp version | head -1)
+            log_info "🔧 FrankenPHP version: $FRANKEN_VERSION"
+        fi
+    else
+        log_warning "⚠️  FrankenPHP binary tidak ditemukan di direktori app"
+        log_info "Laravel Octane mungkin menginstalnya di lokasi lain"
     fi
     
     log_info "✅ Laravel Octane dengan FrankenPHP berhasil diinstal!"
     log_info "🔧 Untuk memulai server: php artisan octane:start --server=frankenphp"
+    log_info "🔧 Atau gunakan: $0 start"
 }
 
 configure_octane() {
@@ -392,6 +436,146 @@ optimize_octane() {
     log_info "✅ Optimisasi selesai!"
 }
 
+debug_octane() {
+    local dir="${1:-.}"
+    
+    log_info "🔍 Debugging Laravel Octane installation..."
+    
+    if ! check_laravel_app "$dir"; then
+        return 1
+    fi
+    
+    cd "$dir"
+    
+    echo ""
+    log_header "📊 SYSTEM INFORMATION"
+    echo "OS: $(uname -s)"
+    echo "Architecture: $(uname -m)"
+    echo "PHP Version: $(php -v | head -1)"
+    echo "Composer Version: $(composer --version 2>/dev/null || echo 'Not installed')"
+    
+    echo ""
+    log_header "📦 LARAVEL INFORMATION"
+    if [ -f "artisan" ]; then
+        echo "Laravel Version: $(php artisan --version 2>/dev/null || echo 'Unknown')"
+    fi
+    
+    echo ""
+    log_header "🔧 OCTANE STATUS"
+    if grep -q "laravel/octane" composer.json; then
+        echo "✅ Laravel Octane package: Installed"
+        
+        # Get Octane version
+        OCTANE_VERSION=$(composer show laravel/octane 2>/dev/null | grep "versions" | head -1 || echo "Unknown")
+        echo "Octane Version: $OCTANE_VERSION"
+    else
+        echo "❌ Laravel Octane package: Not installed"
+    fi
+    
+    if [ -f "config/octane.php" ]; then
+        echo "✅ Octane config: Published"
+    else
+        echo "❌ Octane config: Not published"
+    fi
+    
+    echo ""
+    log_header "🚀 FRANKENPHP STATUS"
+    if [ -f "frankenphp" ]; then
+        echo "✅ FrankenPHP binary: Found in app directory"
+        echo "File size: $(ls -lh frankenphp | awk '{print $5}')"
+        echo "Permissions: $(ls -l frankenphp | awk '{print $1}')"
+        
+        if [ -x "frankenphp" ]; then
+            echo "✅ Executable: Yes"
+            if ./frankenphp version >/dev/null 2>&1; then
+                echo "✅ Working: Yes"
+                echo "Version: $(./frankenphp version | head -1)"
+            else
+                echo "❌ Working: No (might be missing dependencies)"
+            fi
+        else
+            echo "❌ Executable: No"
+        fi
+    else
+        echo "❌ FrankenPHP binary: Not found in app directory"
+        
+        # Check if it's in vendor directory
+        if [ -f "vendor/bin/frankenphp" ]; then
+            echo "✅ FrankenPHP binary: Found in vendor/bin"
+        else
+            echo "❌ FrankenPHP binary: Not found in vendor/bin either"
+        fi
+    fi
+    
+    echo ""
+    log_header "🌐 NETWORK CONNECTIVITY"
+    if ping -c 1 google.com >/dev/null 2>&1; then
+        echo "✅ Internet connectivity: OK"
+    else
+        echo "❌ Internet connectivity: Failed"
+    fi
+    
+    if curl -s https://api.github.com/repos/php/frankenphp/releases/latest >/dev/null 2>&1; then
+        echo "✅ GitHub API access: OK"
+    else
+        echo "❌ GitHub API access: Failed"
+    fi
+    
+    echo ""
+    log_header "📝 ENVIRONMENT VARIABLES"
+    if [ -f ".env" ]; then
+        echo "✅ .env file: Found"
+        
+        if grep -q "OCTANE_SERVER" .env; then
+            echo "✅ OCTANE_SERVER: $(grep OCTANE_SERVER .env | cut -d'=' -f2)"
+        else
+            echo "❌ OCTANE_SERVER: Not set"
+        fi
+        
+        if grep -q "OCTANE_HOST" .env; then
+            echo "✅ OCTANE_HOST: $(grep OCTANE_HOST .env | cut -d'=' -f2)"
+        else
+            echo "❌ OCTANE_HOST: Not set"
+        fi
+        
+        if grep -q "OCTANE_PORT" .env; then
+            echo "✅ OCTANE_PORT: $(grep OCTANE_PORT .env | cut -d'=' -f2)"
+        else
+            echo "❌ OCTANE_PORT: Not set"
+        fi
+        
+        if grep -q "OCTANE_WORKERS" .env; then
+            echo "✅ OCTANE_WORKERS: $(grep OCTANE_WORKERS .env | cut -d'=' -f2)"
+        else
+            echo "❌ OCTANE_WORKERS: Not set"
+        fi
+    else
+        echo "❌ .env file: Not found"
+    fi
+    
+    echo ""
+    log_header "💡 RECOMMENDATIONS"
+    
+    if ! grep -q "laravel/octane" composer.json; then
+        echo "🔧 Run: $0 install"
+    fi
+    
+    if [ ! -f "config/octane.php" ]; then
+        echo "🔧 Run: $0 configure"
+    fi
+    
+    if [ ! -f "frankenphp" ] && [ ! -f "vendor/bin/frankenphp" ]; then
+        echo "🔧 Run: php artisan octane:install --server=frankenphp --force"
+    fi
+    
+    if [ -f ".env" ] && ! grep -q "OCTANE_SERVER" .env; then
+        echo "🔧 Run: $0 configure"
+    fi
+    
+    echo ""
+    log_info "🔍 Debug completed. Check the information above for any issues."
+}
+
 # Main script logic
 case "${1:-help}" in
     "install")
@@ -411,6 +595,9 @@ case "${1:-help}" in
         ;;
     "optimize")
         optimize_octane "$2"
+        ;;
+    "debug")
+        debug_octane "$2"
         ;;
     "help"|*)
         show_help

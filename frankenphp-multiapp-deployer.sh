@@ -1860,30 +1860,63 @@ CREATED_SUPERVISOR_FILE="/etc/supervisor/conf.d/laravel-worker-$APP_NAME.conf"
 
 # Install Laravel Octane with FrankenPHP
 if [ -f "artisan" ]; then
-    log_info "Installing Laravel Octane with FrankenPHP..."
+    log_info "🚀 Installing Laravel Octane with FrankenPHP..."
     
     # Install Octane if not already installed
     if ! grep -q "laravel/octane" composer.json; then
-        log_info "Installing Laravel Octane package..."
-        composer require laravel/octane
+        log_info "📦 Installing Laravel Octane package..."
+        if ! composer require laravel/octane; then
+            log_error "Failed to install Laravel Octane package"
+            exit 1
+        fi
+        log_info "✅ Laravel Octane package installed successfully"
+    else
+        log_info "✅ Laravel Octane package already installed"
     fi
     
     # Install FrankenPHP via Octane (automatically downloads binary)
-    log_info "Installing FrankenPHP via Octane..."
-    php artisan octane:install --server=frankenphp --force
+    log_info "⬇️  Installing FrankenPHP via Laravel Octane..."
+    log_info "This will automatically download the correct FrankenPHP binary for your system"
+    
+    # Run octane:install with proper error handling
+    if php artisan octane:install --server=frankenphp --force; then
+        log_info "✅ FrankenPHP installed successfully via Laravel Octane"
+    else
+        log_error "Failed to install FrankenPHP via Laravel Octane"
+        log_info "This might be due to:"
+        log_info "  - Network connectivity issues"
+        log_info "  - GitHub API rate limits"
+        log_info "  - Unsupported architecture"
+        exit 1
+    fi
     
     # Publish Octane config if needed
     if [ ! -f "config/octane.php" ]; then
+        log_info "📝 Publishing Octane configuration..."
         php artisan vendor:publish --provider="Laravel\Octane\OctaneServiceProvider" --tag=config
+        log_info "✅ Octane configuration published"
+    else
+        log_info "✅ Octane configuration already exists"
     fi
     
-    log_info "✅ Laravel Octane with FrankenPHP installed successfully"
+    # Verify FrankenPHP installation
+    if [ -f "frankenphp" ]; then
+        log_info "✅ FrankenPHP binary found in app directory"
+        chmod +x frankenphp
+        chown www-data:www-data frankenphp
+    else
+        log_warning "⚠️  FrankenPHP binary not found in app directory"
+        log_info "Laravel Octane might have installed it in a different location"
+    fi
+    
+    log_info "✅ Laravel Octane with FrankenPHP setup completed successfully"
 else
-    log_info "⚠️  No artisan file found, downloading FrankenPHP binary manually..."
+    log_info "⚠️  No artisan file found, this is not a Laravel project"
+    log_info "Falling back to manual FrankenPHP binary download..."
     
     # Fallback to manual download if not a Laravel project
     if [ ! -f "$APP_DIR/frankenphp" ]; then
-        log_info "Downloading FrankenPHP binary..."
+        log_info "📥 Downloading FrankenPHP binary manually..."
         cd $APP_DIR
 
         # Detect architecture
@@ -1901,15 +1934,68 @@ else
                 ;;
         esac
 
-        # Download latest FrankenPHP
-        FRANKEN_VERSION=$(curl -s https://api.github.com/repos/dunglas/frankenphp/releases/latest | grep -oP '"tag_name": "\K[^"]+')
-        FRANKEN_URL="https://github.com/dunglas/frankenphp/releases/download/${FRANKEN_VERSION}/frankenphp-linux-${FRANKEN_ARCH}"
-
-        wget -O frankenphp "$FRANKEN_URL"
+        # Download latest FrankenPHP with improved error handling
+        log_info "🔍 Getting latest FrankenPHP version..."
+        
+        # Try multiple methods to get version (compatible with different systems)
+        FRANKEN_VERSION=""
+        
+        # Method 1: Using sed (most portable)
+        if [ -z "$FRANKEN_VERSION" ]; then
+            FRANKEN_VERSION=$(curl -sL https://api.github.com/repos/php/frankenphp/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+        fi
+        
+        # Method 2: Using awk as fallback
+        if [ -z "$FRANKEN_VERSION" ]; then
+            FRANKEN_VERSION=$(curl -sL https://api.github.com/repos/php/frankenphp/releases/latest | awk -F'"' '/"tag_name"/ {print $4; exit}')
+        fi
+        
+        # Method 3: Using python if available
+        if [ -z "$FRANKEN_VERSION" ] && command -v python3 >/dev/null 2>&1; then
+            FRANKEN_VERSION=$(curl -sL https://api.github.com/repos/php/frankenphp/releases/latest | python3 -c "import sys, json; print(json.load(sys.stdin)['tag_name'])" 2>/dev/null || echo "")
+        fi
+        
+        # Fallback to known working version
+        if [ -z "$FRANKEN_VERSION" ]; then
+            log_warning "⚠️  Failed to get latest version from GitHub API, using fallback version"
+            FRANKEN_VERSION="v1.8.0"
+        fi
+        
+        FRANKEN_URL="https://github.com/php/frankenphp/releases/download/${FRANKEN_VERSION}/frankenphp-linux-${FRANKEN_ARCH}"
+        
+        log_info "📥 Downloading FrankenPHP ${FRANKEN_VERSION} for ${FRANKEN_ARCH}..."
+        log_info "URL: $FRANKEN_URL"
+        
+        # Try wget first, then curl as fallback
+        if command -v wget >/dev/null 2>&1; then
+            if ! wget -O frankenphp "$FRANKEN_URL"; then
+                log_warning "wget failed, trying curl..."
+                if ! curl -L -o frankenphp "$FRANKEN_URL"; then
+                    log_error "Both wget and curl failed to download FrankenPHP binary"
+                    log_error "Please check your internet connection and try again"
+                    exit 1
+                fi
+            fi
+        else
+            if ! curl -L -o frankenphp "$FRANKEN_URL"; then
+                log_error "curl failed to download FrankenPHP binary"
+                log_error "Please check your internet connection and try again"
+                exit 1
+            fi
+        fi
+        
+        # Verify download
+        if [ ! -f "frankenphp" ] || [ ! -s "frankenphp" ]; then
+            log_error "Downloaded FrankenPHP binary is empty or missing"
+            exit 1
+        fi
+        
         chmod +x frankenphp
         chown www-data:www-data frankenphp
 
-        log_info "✅ FrankenPHP binary downloaded: $FRANKEN_VERSION"
+        log_info "✅ FrankenPHP binary downloaded successfully: $FRANKEN_VERSION"
+    else
+        log_info "✅ FrankenPHP binary already exists"
     fi
 fi
 
@@ -4045,6 +4131,7 @@ log_info "  octane-helper.sh start [directory]       - Start Laravel Octane serv
 log_info "  octane-helper.sh stop [directory]        - Stop Laravel Octane server"
 log_info "  octane-helper.sh status [directory]      - Check Octane server status"
 log_info "  octane-helper.sh optimize [directory]    - Optimize Laravel app for Octane"
+log_info "  octane-helper.sh debug [directory]       - Debug Octane installation issues"
 log_info ""
 log_info "🔍 Resource Monitoring & Optimization:"
 log_info "  monitor-server-resources             - Real-time server resource monitoring"
@@ -4062,6 +4149,7 @@ log_info "  ./octane-helper.sh install /opt/laravel-apps/web_sam"
 log_info "  ./octane-helper.sh configure ."
 log_info "  ./octane-helper.sh start"
 log_info "  ./octane-helper.sh optimize /var/www/laravel-app"
+log_info "  ./octane-helper.sh debug                              # Debug installation issues"
 log_info ""
 log_info "📝 App naming rules:"
 log_info "  - Use underscores instead of dashes (web_sam not web-sam)"
