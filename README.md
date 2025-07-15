@@ -1,208 +1,191 @@
-# FrankLaraPloy: FrankenPHP Multi-App Deployer
+# FrankLaraPloy
+
+🚀 **FrankenPHP Multi-App Deployer for Laravel Applications**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Platform: Ubuntu 24.04](https://img.shields.io/badge/Platform-Ubuntu%2024.04-orange.svg)]()
-[![PHP Version: 8.3](https://img.shields.io/badge/PHP-8.3-blue.svg)]()
+[![Ubuntu](https://img.shields.io/badge/Ubuntu-24.04%20LTS-orange.svg)](https://ubuntu.com/)
+[![PHP](https://img.shields.io/badge/PHP-8.3+-blue.svg)](https://php.net/)
+[![Laravel](https://img.shields.io/badge/Laravel-10%2B-red.svg)](https://laravel.com/)
 
-**Repository**: [https://github.com/MekayaStudio/FrankLaraPloy](https://github.com/MekayaStudio/FrankLaraPloy)
+Script deployment otomatis untuk aplikasi Laravel menggunakan FrankenPHP dengan arsitektur modular yang dioptimasi untuk Indonesia.
 
-**FrankLaraPloy** adalah script deployment otomatis untuk menjalankan beberapa aplikasi Laravel pada satu server Ubuntu 24.04. Ditenagai oleh **FrankenPHP**, script ini menyederhanakan manajemen server, meningkatkan performa, dan menyediakan fitur-fitur canggih seperti scaling, monitoring, dan auto-rollback.
+## ✨ Features
 
----
+- **🏗️ Modular Architecture** - Code terorganisir dalam modul terpisah
+- **🇮🇩 Indonesia Mirror** - Mirror Ubuntu Indonesia untuk download cepat
+- **📊 Resource Awareness** - Monitoring dan optimasi resource otomatis
+- **⚡ Command Shortcuts** - Perintah mudah tanpa path panjang
+- **🔒 Auto HTTPS** - SSL otomatis dengan Let's Encrypt
+- **🔄 GitHub Integration** - Deploy otomatis dari repository
+- **🛡️ Auto Rollback** - Rollback otomatis jika terjadi error
 
-## 🚀 Fitur Utama
+## 🚀 Quick Start
 
-- **Multi-App Isolation**: Jalankan beberapa proyek Laravel dengan aman di satu server, masing-masing dengan konfigurasi dan resource yang terisolasi.
-- **Intelligent Resource Management**: Alokasi thread otomatis dan pengecekan resource sebelum deployment untuk mencegah server overload.
-- **One-Command Horizontal Scaling**: Scale-up atau scale-down aplikasi dengan mudah untuk menangani beban traffic yang fluktuatif.
-- **Zero-Downtime Deployment**: Integrasi dengan GitHub untuk deployment otomatis tanpa mengganggu layanan.
-- **Automated Security**: Konfigurasi server web Caddy dengan HTTPS otomatis (Let's Encrypt) dan service hardening.
-- **Idempotent & Robust**: Script aman untuk dijalankan berulang kali, dilengkapi error handling dan mekanisme rollback otomatis.
-- **Automated Backups**: Backup harian untuk file aplikasi dan database secara otomatis.
+### Prerequisites
 
----
+- Ubuntu 24.04 LTS
+- Root access
+- Internet connection
 
-## 📋 Persyaratan
-
-- **Sistem Operasi**: Ubuntu 24.04 LTS
-- **RAM**: Minimal 2GB (Rekomendasi: 4GB+)
-- **CPU**: Minimal 2 core (Rekomendasi: 4+ core)
-- **Akses**: Root privileges
-
----
-
-## 🔧 Instalasi & Quick Start
-
-### 1. Jalankan Installer
-Instalasi dapat dilakukan dengan satu perintah. Script akan mengurus semua dependensi (PHP, MySQL, Redis, dll), konfigurasi, dan security setup.
+### Installation
 
 ```bash
-# Opsi 1: Curl
-curl -sSL https://raw.githubusercontent.com/MekayaStudio/FrankLaraPloy/main/frankenphp-multiapp-deployer.sh | sudo bash
+# Clone repository
+git clone https://github.com/MekayaStudio/FrankLaraPloy.git
+cd FrankLaraPloy
 
-# Opsi 2: Wget
-wget -qO- https://raw.githubusercontent.com/MekayaStudio/FrankLaraPloy/main/frankenphp-multiapp-deployer.sh | sudo bash
+# Install
+sudo ./install.sh
+
+# Setup system
+sudo frankenphp-setup
 ```
 
-### 2. Buat Aplikasi Pertama Anda
-Setelah instalasi selesai, Anda dapat langsung membuat aplikasi pertama.
+### Basic Usage
 
 ```bash
-# Buat aplikasi dari repository GitHub
-create-laravel-app web_app_1 my-app.com https://github.com/user/laravel-app.git
+# Create Laravel app
+create-laravel-app myapp domain.com https://github.com/user/repo.git
 
-# Atau buat aplikasi kosong untuk diisi manual
-create-laravel-app api_service my-api.com
-```
+# Deploy app
+deploy-laravel-app myapp
 
-### 3. Kelola Aplikasi Anda
-Gunakan perintah yang tersedia untuk mengelola aplikasi.
-
-```bash
-# Start service aplikasi
-sudo systemctl start frankenphp-web_app_1
-
-# Cek status semua aplikasi
-list-laravel-apps
-
-# Monitor resource server
+# Monitor resources
 monitor-server-resources
 ```
 
----
+## 📚 Commands
 
-## 📚 Referensi Perintah
-
-Semua perintah dapat diakses secara global setelah instalasi.
-
-### Manajemen Aplikasi
-| Perintah | Deskripsi |
-|---|---|
-| `create-laravel-app <nama> <domain> [repo] [db]` | Membuat aplikasi baru. |
-| `deploy-laravel-app <nama>` | Menjalankan deployment (git pull, migrate, dll). |
-| `list-laravel-apps` | Menampilkan daftar semua aplikasi dan statusnya. |
-| `remove-laravel-app <nama>` | Menghapus aplikasi, database, dan konfigurasinya. |
-| `status-laravel-app <nama>` | Menampilkan status detail sebuah aplikasi. |
-| `enable-https-app <nama>` | Mengaktifkan HTTPS (Let's Encrypt) untuk domain. |
-
-### Horizontal Scaling
-| Perintah | Deskripsi |
-|---|---|
-| `scale-laravel-app <nama> scale-up <port>` | Menambah instance baru untuk load balancing. |
-| `scale-laravel-app <nama> scale-down <port>`| Menghapus instance yang sudah ada. |
-
-### Monitoring & Optimasi
-| Perintah | Deskripsi |
-|---|---|
-| `monitor-server-resources` | Menampilkan ringkasan resource server secara real-time. |
-| `analyze-app-resources` | Menampilkan analisis resource yang digunakan per aplikasi. |
-| `predict-resource-impact <action>` | Memprediksi dampak resource dari sebuah tindakan (misal: `new-app`). |
-| `optimize-server-resources` | Memberikan rekomendasi untuk optimasi resource. |
-
-### Backup
-| Perintah | Deskripsi |
-|---|---|
-| `backup-all-laravel-apps` | Menjalankan backup manual untuk semua aplikasi. |
-
----
-
-## 🧠 Arsitektur & Konsep
-
-### Arsitektur Sistem
-Diagram ini menunjukkan bagaimana semua komponen saling berinteraksi.
-```mermaid
-graph TB
-    subgraph "User"
-        Client[Client Browser]
-    end
-    
-    subgraph "Ubuntu Server"
-        LB(FrankenPHP / Caddy<br>Load Balancer & SSL)
-        
-        subgraph "Aplikasi (Terisolasi)"
-            App1[Instance 1<br>web_app_1]
-            App2[Instance 2<br>web_app_1_8001]
-            App3[Instance 3<br>api_service]
-        end
-
-        subgraph "Services"
-            DB[(MySQL)]
-            Cache[(Redis)]
-            Worker[Supervisor<br>Queue Workers]
-            Cron[Cron<br>Scheduler]
-        end
-    end
-    
-    Client --> LB
-    LB --> App1
-    LB --> App2
-    LB -- route --> App3
-
-    App1 & App2 & App3 --> DB & Cache & Worker & Cron
+### App Management
+```bash
+create-laravel-app <name> <domain> [repo]    # Create new app
+deploy-laravel-app <name>                     # Deploy app
+list-laravel-apps                             # List all apps
+status-laravel-app <name>                     # Check app status
+remove-laravel-app <name>                     # Remove app
 ```
 
-### Alur Kerja Deployment
-Proses deployment dirancang agar aman dengan pre-flight check dan rollback otomatis.
-```mermaid
-graph TD
-    A["Start: create-laravel-app"] --> B["Resource Check"]
-    B --> C{"Cukup?"}
-    C -->|Tidak| D["Gagal & Exit"]
-    C -->|Ya| E["Setup App & DB"]
-    E --> F["Clone Repo & Install Deps"]
-    F --> G["Konfigurasi Service & Caddy"]
-    G --> H{"Sukses?"}
-    H -->|Tidak| I["Rollback Otomatis"]
-    H -->|Ya| J["✅ Selesai"]
+### Monitoring
+```bash
+monitor-server-resources                      # Monitor server resources
+analyze-app-resources                         # Analyze app resources
+backup-all-laravel-apps                       # Backup all apps
 ```
+
+### System
+```bash
+frankenphp-setup                              # Setup system
+frankenphp help                               # Show help
+```
+
+## 🏗️ Architecture
+
+```
+FrankLaraPloy/
+├── frankenphp-multiapp-deployer-optimized.sh  # Main script
+├── install.sh                                 # Installer
+├── lib/                                        # Modules
+│   ├── config.sh                              # Configuration
+│   ├── utils.sh                               # Utilities
+│   ├── system_setup.sh                        # System setup
+│   ├── resource_management.sh                 # Resource monitoring
+│   └── app_management.sh                      # App management
+├── README.md                                  # Documentation
+└── SUMMARY.md                                 # Summary
+```
+
+## ⚙️ Configuration
+
+### Indonesia Mirrors
+- **Primary**: mirror.unpad.ac.id (UNPAD)
+- **Secondary**: mirror.unej.ac.id (UNEJ)
+- **Tertiary**: mirror.repository.id
+
+### Resource Limits
+- Memory safety margin: 20%
+- CPU safety margin: 25%
+- Min memory per app: 512MB
+- Max apps per server: 10
+
+## 📝 App Naming Rules
+
+### ✅ Valid Names
+- `web_sam_l12`
+- `api_service_v2`
+- `websaml12`
+
+### ❌ Invalid Names
+- `web-sam-l12` (dashes not allowed)
+- `123web` (cannot start with number)
+- `web sam` (spaces not allowed)
+
+## 🔧 Examples
+
+### Create App from GitHub
+```bash
+create-laravel-app web_sam testingsetup.rizqis.com https://github.com/CompleteLabs/web-app-sam.git
+```
+
+### Create Empty App
+```bash
+create-laravel-app api_service api.domain.com
+```
+
+### Deploy and Monitor
+```bash
+deploy-laravel-app web_sam
+status-laravel-app web_sam
+monitor-server-resources
+```
+
+## 🛠️ Troubleshooting
+
+### Command Not Found
+```bash
+sudo ./install.sh
+```
+
+### Slow Downloads
+System automatically falls back to alternative mirrors.
+
+### Resource Issues
+```bash
+monitor-server-resources
+remove-laravel-app unused_app
+```
+
+## 📊 Performance
+
+- **5-10x faster** downloads with Indonesia mirrors
+- **Modular architecture** for better maintainability
+- **Smart resource allocation** based on server capacity
+- **Zero-downtime deployment**
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing-feature`)
+5. Open Pull Request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- FrankenPHP team for the amazing server
+- Laravel community
+- Indonesian mirror providers
+- All contributors
+
+## 📞 Support
+
+- 🐛 [Issues](https://github.com/MekayaStudio/FrankLaraPloy/issues)
+- 💬 [Discussions](https://github.com/MekayaStudio/FrankLaraPloy/discussions)
+- 📧 Email: support@mekayastudio.com
 
 ---
 
-## 🔧 Konfigurasi & Praktik Terbaik
-
-### Struktur Direktori
-```
-/opt/laravel-apps/          # Base directory untuk semua aplikasi
-├── web_app_1/              # Direktori aplikasi
-│   ├── app/
-│   ├── public/
-│   ├── Caddyfile           # Konfigurasi Caddy spesifik
-│   ├── frankenphp          # Binary FrankenPHP
-│   └── .env
-└── api_service/
-
-/etc/laravel-apps/          # File konfigurasi global per aplikasi
-├── web_app_1.conf
-└── api_service.conf
-
-/var/log/frankenphp/        # Log dari FrankenPHP
-/var/backups/laravel-apps/  # Direktori backup harian
-```
-
-### Keamanan
-- **Firewall (UFW)**: Hanya port 22, 80, dan 443 yang diizinkan.
-- **Service Hardening**: Layanan systemd berjalan dengan privilese terbatas (`NoNewPrivileges`, `PrivateTmp`, `ProtectSystem`).
-- **Database**: Setiap aplikasi memiliki user database sendiri dengan password acak.
-
-### Aturan Penamaan Aplikasi
-- **Valid**: `web_app`, `api_v2`, `project_name`
-- **Tidak Valid**: `web-app` (hindari tanda hubung), `my app` (hindari spasi)
-- **Aturan**: Gunakan huruf, angka, dan `_` (underscore). Harus dimulai dengan huruf.
-
----
-
-## 🚨 Troubleshooting
-
-- **Gagal Membuat Aplikasi**: Pastikan nama aplikasi dan domain valid. Cek `monitor-server-resources` untuk memastikan resource cukup.
-- **Service Tidak Berjalan**: Gunakan `systemctl status frankenphp-<nama-app>` dan `journalctl -u frankenphp-<nama-app> -f` untuk melihat log error.
-- **Error 5xx**: Cek log aplikasi di `/opt/laravel-apps/<nama-app>/storage/logs/laravel.log` dan log FrankenPHP di `/var/log/frankenphp/<nama-app>.log`.
-
----
-
-## 🤝 Kontribusi
-
-Kontribusi dalam bentuk apapun sangat kami hargai. Silakan buat *pull request* atau *issue* di repository GitHub.
-
-## 📄 Lisensi
-
-Proyek ini dilisensikan di bawah [MIT License](https://opensource.org/licenses/MIT).
+**Made with ❤️ for Indonesian Laravel Developers**
