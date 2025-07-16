@@ -34,16 +34,21 @@ Sistem deployment multi-aplikasi Laravel yang menggunakan FrankenPHP dengan duku
 
 ```
 scripts/
-├── lib/                              # Shared libraries
-│   ├── shared-functions.sh           # Fungsi-fungsi umum
+├── lib/                              # Modular libraries
+│   ├── shared-functions.sh           # Common utilities
 │   ├── error-handler.sh              # Error handling & rollback
-│   └── validation.sh                 # Validasi komprehensif
+│   ├── validation.sh                 # Comprehensive validation
+│   ├── app-management.sh             # App lifecycle management
+│   ├── octane-manager.sh             # Laravel Octane operations
+│   ├── database-manager.sh           # Database operations
+│   ├── systemd-manager.sh            # Service management
+│   ├── ssl-manager.sh                # SSL/HTTPS management
+│   ├── connection-manager.sh         # Connection troubleshooting
+│   └── debug-manager.sh              # Testing and debugging
 ├── config/
-│   └── frankenphp-config.conf        # Konfigurasi sistem
-├── install.sh                       # 🆕 One-command installer
-├── frankenphp-multiapp-deployer.sh   # Script sistem deployment
-├── octane-helper.sh                  # Helper Laravel Octane
-└── README.md                         # Dokumentasi ini
+│   └── frankenphp-config.conf        # System configuration
+├── install.sh                       # 🆕 Main installer (refactored)
+└── README.md                         # This documentation
 ```
 
 ## 🛠️ Instalasi
@@ -201,11 +206,11 @@ CREATED_AT=2024-01-01 10:00:00
 ```bash
 # Enable debug mode
 export DEBUG=true
-./octane-helper-refactored.sh debug
+./install.sh debug
 
 # Skip pre-flight checks (development)
 export SKIP_PREFLIGHT_CHECKS=true
-create-laravel-app test_app localhost
+./install.sh install test_app localhost
 ```
 
 ### Manual FrankenPHP Configuration
@@ -538,10 +543,10 @@ export VERBOSE_LOGGING=true
 
 ```bash
 # Test script dengan dry-run
-SKIP_PREFLIGHT_CHECKS=true ./octane-helper-refactored.sh debug
+SKIP_PREFLIGHT_CHECKS=true ./install.sh debug
 
 # Test resource calculation
-monitor-server-resources
+./install.sh monitor
 
 # Test validation
 echo "test_app" | ./lib/validation.sh validate_app_name
@@ -556,8 +561,8 @@ MIT License - Lihat file LICENSE untuk detail lengkap.
 Untuk bantuan dan dukungan:
 
 1. **Documentation**: Baca README ini dengan lengkap
-2. **Debug**: Gunakan `./octane-helper-refactored.sh debug --verbose`
-3. **Monitoring**: Jalankan `monitor-server-resources` untuk analisis
+2. **Debug**: Gunakan `./install.sh debug` untuk troubleshooting
+3. **Monitoring**: Jalankan `./install.sh monitor` untuk analisis
 4. **Logs**: Periksa `/var/log/frankenphp/` untuk error logs
 
 ## 🔮 Roadmap

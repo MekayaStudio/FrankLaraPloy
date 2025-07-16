@@ -78,9 +78,9 @@ log_error_to_file() {
     local context="$3"
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     local log_file="${LOG_DIR}/error.log"
-    
+
     ensure_directory "$(dirname "$log_file")"
-    
+
     cat >> "$log_file" <<EOF
 [$timestamp] ERROR: $error_msg
 Code: $error_code ($(get_error_description $error_code))
@@ -94,13 +94,13 @@ EOF
 generate_stack_trace() {
     local stack_trace=""
     local frame=0
-    
+
     while caller $frame >/dev/null 2>&1; do
         local line_info=$(caller $frame)
         stack_trace="$stack_trace\n  Frame $frame: $line_info"
         ((frame++))
     done
-    
+
     echo -e "$stack_trace"
 }
 
@@ -113,23 +113,23 @@ set_error() {
     local error_code="$1"
     local error_message="$2"
     local context="${3:-}"
-    
+
     ERROR_OCCURRED=true
     ERROR_CODE="$error_code"
     ERROR_MESSAGE="$error_message"
     ERROR_CONTEXT="$context"
     ERROR_TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
     ERROR_STACK_TRACE=$(generate_stack_trace)
-    
+
     # Log error
     log_error_to_file "$error_message" "$error_code" "$context"
-    
+
     # Display error
     log_error "[$(get_error_description $error_code)] $error_message"
     if [ -n "$context" ]; then
         log_error "Context: $context"
     fi
-    
+
     # Set rollback needed if not already set
     if [ "$ROLLBACK_NEEDED" = false ]; then
         ROLLBACK_NEEDED=true
@@ -174,7 +174,7 @@ get_error_details() {
 add_rollback_action() {
     local action="$1"
     local description="$2"
-    
+
     ROLLBACK_ACTIONS+=("$action|$description")
     log_debug "Rollback action added: $description"
 }
@@ -185,18 +185,18 @@ execute_rollback() {
         log_info "No rollback actions to execute"
         return 0
     fi
-    
+
     log_warning "Executing rollback actions..."
-    
+
     # Execute rollback actions in reverse order
     local i
     for ((i=${#ROLLBACK_ACTIONS[@]}-1; i>=0; i--)); do
         local action_data="${ROLLBACK_ACTIONS[$i]}"
         local action="${action_data%%|*}"
         local description="${action_data##*|}"
-        
+
         log_info "Rollback: $description"
-        
+
         # Execute action with error handling
         if eval "$action" 2>/dev/null; then
             log_info "✅ Rollback action completed: $description"
@@ -204,7 +204,7 @@ execute_rollback() {
             log_error "❌ Rollback action failed: $description"
         fi
     done
-    
+
     log_info "Rollback completed"
     clear_error
 }
@@ -285,11 +285,11 @@ try_recover() {
     local recovery_function="$1"
     local max_attempts="${2:-3}"
     local delay="${3:-5}"
-    
+
     local attempt=1
     while [ $attempt -le $max_attempts ]; do
         log_info "Recovery attempt $attempt of $max_attempts..."
-        
+
         if eval "$recovery_function"; then
             log_info "Recovery successful"
             clear_error
@@ -301,10 +301,10 @@ try_recover() {
                 sleep "$delay"
             fi
         fi
-        
+
         ((attempt++))
     done
-    
+
     log_error "Recovery failed after $max_attempts attempts"
     return 1
 }
@@ -317,7 +317,7 @@ try_recover() {
 rollback_database_creation() {
     local db_name="$1"
     local db_user="$2"
-    
+
     if [ -n "$db_name" ] && [ -n "$db_user" ]; then
         local mysql_pass=$(get_mysql_credentials)
         if [ $? -eq 0 ]; then
@@ -334,7 +334,7 @@ MYSQL_EOF
 # Rollback directory creation
 rollback_directory_creation() {
     local dir_path="$1"
-    
+
     if [ -n "$dir_path" ] && [ -d "$dir_path" ]; then
         rm -rf "$dir_path"
         log_info "Directory removed: $dir_path"
@@ -344,7 +344,7 @@ rollback_directory_creation() {
 # Rollback file creation
 rollback_file_creation() {
     local file_path="$1"
-    
+
     if [ -n "$file_path" ] && [ -f "$file_path" ]; then
         rm -f "$file_path"
         log_info "File removed: $file_path"
@@ -354,7 +354,7 @@ rollback_file_creation() {
 # Rollback service creation
 rollback_service_creation() {
     local service_name="$1"
-    
+
     if [ -n "$service_name" ]; then
         systemctl stop "$service_name" 2>/dev/null || true
         systemctl disable "$service_name" 2>/dev/null || true
@@ -368,7 +368,7 @@ rollback_service_creation() {
 rollback_cron_creation() {
     local cron_pattern="$1"
     local user="${2:-www-data}"
-    
+
     if [ -n "$cron_pattern" ]; then
         crontab -u "$user" -l 2>/dev/null | grep -v "$cron_pattern" | crontab -u "$user" - 2>/dev/null || true
         log_info "Cron job removed: $cron_pattern"
@@ -384,12 +384,12 @@ enhanced_error_trap() {
     local exit_code=$?
     local line_number=$1
     local command="$2"
-    
+
     # Skip if error already handled
     if has_error; then
         return $exit_code
     fi
-    
+
     # Set error details
     ERROR_OCCURRED=true
     ERROR_CODE=$exit_code
@@ -397,17 +397,17 @@ enhanced_error_trap() {
     ERROR_CONTEXT="Exit code: $exit_code"
     ERROR_TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
     ERROR_STACK_TRACE=$(generate_stack_trace)
-    
+
     # Log error
     log_error_to_file "$ERROR_MESSAGE" "$exit_code" "$ERROR_CONTEXT"
     log_error "Command failed at line $line_number (exit code: $exit_code)"
     log_error "Command: $command"
-    
+
     # Execute rollback if needed
     if [ "$ROLLBACK_NEEDED" = true ]; then
         execute_rollback
     fi
-    
+
     exit $exit_code
 }
 
@@ -426,12 +426,12 @@ validate_with_error_handling() {
     local validation_function="$1"
     local error_message="$2"
     local context="${3:-}"
-    
+
     if ! eval "$validation_function"; then
         handle_validation_error "$error_message" "$context"
         return 1
     fi
-    
+
     return 0
 }
 
@@ -445,18 +445,18 @@ safe_execute() {
     local error_message="$2"
     local context="${3:-}"
     local rollback_action="${4:-}"
-    
+
     # Add rollback action if provided
     if [ -n "$rollback_action" ]; then
         add_rollback_action "$rollback_action" "Rollback for: $command"
     fi
-    
+
     # Execute command
     if ! eval "$command"; then
         set_error $ERROR_UNKNOWN "$error_message" "$context"
         return 1
     fi
-    
+
     return 0
 }
 
@@ -467,7 +467,7 @@ safe_execute_with_retry() {
     local max_attempts="${3:-3}"
     local delay="${4:-5}"
     local context="${5:-}"
-    
+
     local attempt=1
     while [ $attempt -le $max_attempts ]; do
         if eval "$command"; then
@@ -481,7 +481,7 @@ safe_execute_with_retry() {
         fi
         ((attempt++))
     done
-    
+
     set_error $ERROR_UNKNOWN "$error_message" "$context"
     return 1
 }
@@ -493,9 +493,9 @@ safe_execute_with_retry() {
 # Generate error report
 generate_error_report() {
     local report_file="${LOG_DIR}/error-report-$(date +%Y%m%d_%H%M%S).log"
-    
+
     ensure_directory "$(dirname "$report_file")"
-    
+
     cat > "$report_file" <<EOF
 FrankenPHP Multi-App Error Report
 Generated: $(date '+%Y-%m-%d %H:%M:%S')
@@ -523,7 +523,7 @@ $(printf '%s\n' "${ROLLBACK_ACTIONS[@]}" | sed 's/|/ - /')
 
 ===============================================
 EOF
-    
+
     log_info "Error report generated: $report_file"
     echo "$report_file"
 }
@@ -536,14 +536,20 @@ EOF
 init_error_handler() {
     # Setup enhanced error trap
     setup_enhanced_error_trap
-    
+
+    # Skip system directory creation in test mode
+    if [ "${TEST_MODE:-false}" = "true" ]; then
+        log_debug "Error handler initialized in test mode"
+        return 0
+    fi
+
     # Ensure log directory exists
     ensure_directory "$LOG_DIR"
-    
+
     log_debug "Error handler initialized"
 }
 
 # Auto-initialize when sourced (only for root commands)
 if [ "${BASH_SOURCE[0]}" != "${0}" ] && [ "$EUID" -eq 0 ]; then
     init_error_handler
-fi 
+fi

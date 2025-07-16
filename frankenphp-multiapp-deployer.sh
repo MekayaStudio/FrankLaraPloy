@@ -134,31 +134,31 @@ log_error() {
 # Fungsi untuk validasi domain
 validate_domain() {
     local domain="$1"
-    
+
     # Regex pattern untuk validasi domain
     # Mendukung: domain.com, sub.domain.com, domain.co.id, localhost, 192.168.1.1
     local domain_regex="^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$"
     local ip_regex="^([0-9]{1,3}\.){3}[0-9]{1,3}$"
     local localhost_regex="^localhost$"
-    
+
     # Check if empty
     if [ -z "$domain" ]; then
         log_error "Domain tidak boleh kosong!"
         return 1
     fi
-    
+
     # Check length (max 253 characters)
     if [ ${#domain} -gt 253 ]; then
         log_error "Domain terlalu panjang (maksimal 253 karakter)!"
         return 1
     fi
-    
+
     # Check if localhost
     if [[ "$domain" =~ $localhost_regex ]]; then
         log_info "✅ Domain localhost valid"
         return 0
     fi
-    
+
             # Check if IP address (only digits and dots)
         if [[ "$domain" =~ ^[0-9.]+$ ]]; then
             # Count dots - should be exactly 3
@@ -167,39 +167,39 @@ validate_domain() {
                 # Validate IP octets
                 local valid_ip=true
                 IFS='.' read -ra OCTETS <<< "$domain"
-                
+
                 # Check exactly 4 octets
                 if [ ${#OCTETS[@]} -ne 4 ]; then
                     log_error "IP address $domain tidak valid!"
                     return 1
                 fi
-                
+
                 for octet in "${OCTETS[@]}"; do
                     # Check if octet is empty
                     if [ -z "$octet" ]; then
                         valid_ip=false
                         break
                     fi
-                    
+
                     # Check if octet is numeric
                     if ! [[ "$octet" =~ ^[0-9]+$ ]]; then
                         valid_ip=false
                         break
                     fi
-                    
+
                     # Check if octet is in valid range (0-255)
                     if [ $octet -gt 255 ]; then
                         valid_ip=false
                         break
                     fi
-                    
+
                     # Check for leading zeros (except for "0" itself)
                     if [ ${#octet} -gt 1 ] && [ "${octet:0:1}" = "0" ]; then
                         valid_ip=false
                         break
                     fi
                 done
-                
+
                 if [ "$valid_ip" = true ]; then
                     log_info "✅ IP address $domain valid"
                     return 0
@@ -212,7 +212,7 @@ validate_domain() {
                 return 1
             fi
         fi
-    
+
     # Check domain format
     if [[ "$domain" =~ $domain_regex ]]; then
         log_info "✅ Domain $domain valid"
@@ -233,30 +233,30 @@ validate_domain() {
 validate_port() {
     local port="$1"
     local check_in_use="${2:-true}"
-    
+
     # Check if empty
     if [ -z "$port" ]; then
         log_error "Port tidak boleh kosong!"
         return 1
     fi
-    
+
     # Check if numeric
     if ! [[ "$port" =~ ^[0-9]+$ ]]; then
         log_error "Port harus berupa angka!"
         return 1
     fi
-    
+
     # Check port range (1-65535)
     if [ $port -lt 1 ] || [ $port -gt 65535 ]; then
         log_error "Port harus dalam range 1-65535!"
         return 1
     fi
-    
+
     # Warn about privileged ports
     if [ $port -lt 1024 ]; then
         log_warning "Port $port adalah privileged port (< 1024), memerlukan akses root"
     fi
-    
+
     # Check if port is in use (if requested)
     if [ "$check_in_use" = true ]; then
         if netstat -tuln 2>/dev/null | grep -q ":$port " || ss -tuln 2>/dev/null | grep -q ":$port "; then
@@ -264,7 +264,7 @@ validate_port() {
             return 1
         fi
     fi
-    
+
     log_info "✅ Port $port valid dan tersedia"
     return 0
 }
@@ -272,19 +272,19 @@ validate_port() {
 # Fungsi untuk validasi nama app
 validate_app_name() {
     local app_name="$1"
-    
+
     # Check if empty
     if [ -z "$app_name" ]; then
         log_error "Nama app tidak boleh kosong!"
         return 1
     fi
-    
+
     # Check length (MySQL identifier limit is 64 chars)
     if [ ${#app_name} -gt 60 ]; then
         log_error "Nama app terlalu panjang (maksimal 60 karakter)!"
         return 1
     fi
-    
+
     # Check format (must start with letter, only letters, numbers, underscore)
     if ! [[ "$app_name" =~ ^[a-zA-Z][a-zA-Z0-9_]*$ ]]; then
         log_error "Format nama app '$app_name' tidak valid!"
@@ -300,7 +300,7 @@ validate_app_name() {
         log_error "  - web_app_sam"
         return 1
     fi
-    
+
     # Check reserved words
     local reserved_words=("mysql" "root" "admin" "test" "information_schema" "performance_schema" "sys")
     for reserved in "${reserved_words[@]}"; do
@@ -309,7 +309,7 @@ validate_app_name() {
             return 1
         fi
     done
-    
+
     log_info "✅ Nama app '$app_name' valid"
     return 0
 }
@@ -864,7 +864,7 @@ if ! package_installed redis-server; then
     apt install -y redis-server
     systemctl enable redis-server
     systemctl start redis-server
-    
+
     # Configure Redis for multi-app usage
     sed -i 's/^# maxmemory <bytes>/maxmemory 512mb/' /etc/redis/redis.conf
     sed -i 's/^# maxmemory-policy noeviction/maxmemory-policy allkeys-lru/' /etc/redis/redis.conf
@@ -917,7 +917,7 @@ for port in "${PORTS_TO_CHECK[@]}"; do
     if netstat -tlnp | grep -q ":$port "; then
         local process=$(netstat -tlnp | grep ":$port " | awk '{print $7}' | cut -d'/' -f2 | head -1)
         log_warning "⚠️  Port $port is being used by: $process"
-        
+
         # If it's Apache or Nginx, try to stop it
         if [[ "$process" == "apache2" || "$process" == "nginx" ]]; then
             log_info "Stopping $process to free port $port..."
@@ -973,6 +973,7 @@ CREATED_DB_USER=""
 CREATED_APP_DIR=""
 CREATED_CONFIG_FILE=""
 CREATED_SERVICE_FILE=""
+CREATED_HTTP_SERVICE_FILE=""
 CREATED_SUPERVISOR_FILE=""
 CREATED_CRON_JOBS=""
 CURRENT_APP_NAME=""
@@ -1326,17 +1327,17 @@ source /usr/local/bin/frankenphp-multiapp-deployer.sh 2>/dev/null || true
 if ! type validate_app_name &>/dev/null; then
     validate_app_name() {
         local app_name="$1"
-        
+
         if [ -z "$app_name" ]; then
             log_error "Nama app tidak boleh kosong!"
             return 1
         fi
-        
+
         if [ ${#app_name} -gt 60 ]; then
             log_error "Nama app terlalu panjang (maksimal 60 karakter)!"
             return 1
         fi
-        
+
         if ! [[ "$app_name" =~ ^[a-zA-Z][a-zA-Z0-9_]*$ ]]; then
             log_error "Format nama app '$app_name' tidak valid!"
             log_error "Nama app harus:"
@@ -1351,7 +1352,7 @@ if ! type validate_app_name &>/dev/null; then
             log_error "  - web_app_sam"
             return 1
         fi
-        
+
         local reserved_words=("mysql" "root" "admin" "test" "information_schema" "performance_schema" "sys")
         for reserved in "${reserved_words[@]}"; do
             if [ "${app_name,,}" = "${reserved,,}" ]; then
@@ -1359,32 +1360,32 @@ if ! type validate_app_name &>/dev/null; then
                 return 1
             fi
         done
-        
+
         log_info "✅ Nama app '$app_name' valid"
         return 0
     }
-    
+
     validate_domain() {
         local domain="$1"
         local domain_regex="^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$"
         local ip_regex="^([0-9]{1,3}\.){3}[0-9]{1,3}$"
         local localhost_regex="^localhost$"
-        
+
         if [ -z "$domain" ]; then
             log_error "Domain tidak boleh kosong!"
             return 1
         fi
-        
+
         if [ ${#domain} -gt 253 ]; then
             log_error "Domain terlalu panjang (maksimal 253 karakter)!"
             return 1
         fi
-        
+
         if [[ "$domain" =~ $localhost_regex ]]; then
             log_info "✅ Domain localhost valid"
             return 0
         fi
-        
+
         # Check if IP address (only digits and dots)
         if [[ "$domain" =~ ^[0-9.]+$ ]]; then
             # Count dots - should be exactly 3
@@ -1393,39 +1394,39 @@ if ! type validate_app_name &>/dev/null; then
                 # Validate IP octets
                 local valid_ip=true
                 IFS='.' read -ra OCTETS <<< "$domain"
-                
+
                 # Check exactly 4 octets
                 if [ ${#OCTETS[@]} -ne 4 ]; then
                     log_error "IP address $domain tidak valid!"
                     return 1
                 fi
-                
+
                 for octet in "${OCTETS[@]}"; do
                     # Check if octet is empty
                     if [ -z "$octet" ]; then
                         valid_ip=false
                         break
                     fi
-                    
+
                     # Check if octet is numeric
                     if ! [[ "$octet" =~ ^[0-9]+$ ]]; then
                         valid_ip=false
                         break
                     fi
-                    
+
                     # Check if octet is in valid range (0-255)
                     if [ $octet -gt 255 ]; then
                         valid_ip=false
                         break
                     fi
-                    
+
                     # Check for leading zeros (except for "0" itself)
                     if [ ${#octet} -gt 1 ] && [ "${octet:0:1}" = "0" ]; then
                         valid_ip=false
                         break
                     fi
                 done
-                
+
                 if [ "$valid_ip" = true ]; then
                     log_info "✅ IP address $domain valid"
                     return 0
@@ -1438,7 +1439,7 @@ if ! type validate_app_name &>/dev/null; then
                 return 1
             fi
         fi
-        
+
         if [[ "$domain" =~ $domain_regex ]]; then
             log_info "✅ Domain $domain valid"
             return 0
@@ -1670,10 +1671,10 @@ ENV_EOF
     # Update database credentials in .env
     log_info "Updating database credentials in .env..."
     # Use a safer approach to update .env file to handle special characters in password
-    
+
     # Create a backup of original .env
     cp .env .env.backup
-    
+
     # Use a safe method to update .env file
     {
         # Read the original .env file and update values
@@ -1697,7 +1698,7 @@ ENV_EOF
             esac
         done < .env.backup
     } > .env
-    
+
     # Remove backup file
     rm -f .env.backup
 
@@ -1762,117 +1763,10 @@ else
     log_info "   You can manually deploy your Laravel app to: $APP_DIR"
 fi
 
-# Create Caddyfile for this app
-if [ -f "$APP_DIR/artisan" ]; then
-    # Laravel Octane with reverse proxy
-    cat > $APP_DIR/Caddyfile <<CADDY_EOF
-{
-    # Auto HTTPS will be enabled for real domains
-    auto_https off
-}
-
-# Main domain configuration
-$DOMAIN {
-    encode zstd gzip
-    
-    # Reverse proxy to Laravel Octane
-    reverse_proxy localhost:8000 {
-        header_up Host {http.request.host}
-        header_up X-Real-IP {http.request.remote}
-        header_up X-Forwarded-For {http.request.remote}
-        header_up X-Forwarded-Proto {http.request.scheme}
-        header_up X-Forwarded-Port {http.request.port}
-        
-        # Health check
-        health_uri /health
-        health_interval 30s
-        health_timeout 5s
-        
-        # Fail timeout
-        fail_timeout 30s
-        max_fails 3
-    }
-
-    header {
-        -Server
-        X-Content-Type-Options nosniff
-        X-Frame-Options DENY
-        X-XSS-Protection "1; mode=block"
-        Referrer-Policy strict-origin-when-cross-origin
-        # Add HSTS for production
-        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-    }
-
-    # Logging
-    log {
-        format json
-        output file /var/log/frankenphp/$APP_NAME.log
-        level INFO
-    }
-
-    # Handle large uploads
-    request_body {
-        max_size 100MB
-    }
-}
-
-# Optional: Redirect www to non-www
-www.$DOMAIN {
-    redir https://$DOMAIN{uri} permanent
-}
-CADDY_EOF
-else
-    # Direct FrankenPHP serving
-    cat > $APP_DIR/Caddyfile <<CADDY_EOF
-{
-    frankenphp {
-        num_threads $OPTIMAL_THREADS
-    }
-    # Auto HTTPS will be enabled for real domains
-    auto_https off
-}
-
-# Main domain configuration
-$DOMAIN {
-    root * public
-    encode zstd gzip
-
-    php_server {
-        resolve_root_symlink
-    }
-
-    file_server
-    try_files {path} {path}/ /index.php?{query}
-
-    header {
-        -Server
-        X-Content-Type-Options nosniff
-        X-Frame-Options DENY
-        X-XSS-Protection "1; mode=block"
-        Referrer-Policy strict-origin-when-cross-origin
-        # Add HSTS for production
-        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-    }
-
-    # Logging
-    log {
-        format json
-        output file /var/log/frankenphp/$APP_NAME.log
-        level INFO
-    }
-
-    # Handle large uploads
-    request_body {
-        max_size 100MB
-    }
-}
-
-# Optional: Redirect www to non-www
-www.$DOMAIN {
-    redir https://$DOMAIN{uri} permanent
-}
-CADDY_EOF
-fi
+# Note: No Caddyfile needed for Laravel Octane FrankenPHP native deployment
+# Laravel Octane FrankenPHP handles HTTPS, HTTP/2, HTTP/3 natively via octane:frankenphp command
+log_info "📝 Using native Laravel Octane FrankenPHP deployment (no Caddyfile needed)"
+log_info "   HTTPS, HTTP/2, HTTP/3, and auto SSL certificates handled natively"
 
 # Create systemd service
 if [ -f "$APP_DIR/artisan" ]; then
@@ -1888,7 +1782,7 @@ Type=simple
 User=www-data
 Group=www-data
 WorkingDirectory=$APP_DIR
-ExecStart=/usr/bin/php artisan octane:start --server=frankenphp --host=0.0.0.0 --port=8000 --workers=$OPTIMAL_THREADS
+ExecStart=/usr/bin/php artisan octane:frankenphp --host=$DOMAIN --port=443 --https --workers=$OPTIMAL_THREADS --max-requests=1000 --log-level=info
 ExecReload=/bin/kill -USR1 \$MAINPID
 KillMode=mixed
 KillSignal=SIGINT
@@ -1971,7 +1865,7 @@ CREATED_SUPERVISOR_FILE="/etc/supervisor/conf.d/laravel-worker-$APP_NAME.conf"
 # Install Laravel Octane with FrankenPHP
 if [ -f "artisan" ]; then
     log_info "🚀 Installing Laravel Octane with FrankenPHP..."
-    
+
     # Install Octane if not already installed
     if ! grep -q "laravel/octane" composer.json; then
         log_info "📦 Installing Laravel Octane package..."
@@ -1983,11 +1877,11 @@ if [ -f "artisan" ]; then
     else
         log_info "✅ Laravel Octane package already installed"
     fi
-    
+
     # Install FrankenPHP via Octane (automatically downloads binary)
     log_info "⬇️  Installing FrankenPHP via Laravel Octane..."
     log_info "This will automatically download the correct FrankenPHP binary for your system"
-    
+
     # Run octane:install with proper error handling
     if php artisan octane:install --server=frankenphp --force; then
         log_info "✅ FrankenPHP installed successfully via Laravel Octane"
@@ -1999,7 +1893,7 @@ if [ -f "artisan" ]; then
         log_info "  - Unsupported architecture"
         exit 1
     fi
-    
+
     # Publish Octane config if needed
     if [ ! -f "config/octane.php" ]; then
         log_info "📝 Publishing Octane configuration..."
@@ -2008,7 +1902,7 @@ if [ -f "artisan" ]; then
     else
         log_info "✅ Octane configuration already exists"
     fi
-    
+
     # Verify FrankenPHP installation
     if [ -f "frankenphp" ]; then
         log_info "✅ FrankenPHP binary found in app directory"
@@ -2018,12 +1912,12 @@ if [ -f "artisan" ]; then
         log_warning "⚠️  FrankenPHP binary not found in app directory"
         log_info "Laravel Octane might have installed it in a different location"
     fi
-    
+
     log_info "✅ Laravel Octane with FrankenPHP setup completed successfully"
 else
     log_info "⚠️  No artisan file found, this is not a Laravel project"
     log_info "Falling back to manual FrankenPHP binary download..."
-    
+
     # Fallback to manual download if not a Laravel project
     if [ ! -f "$APP_DIR/frankenphp" ]; then
         log_info "📥 Downloading FrankenPHP binary manually..."
@@ -2046,36 +1940,36 @@ else
 
         # Download latest FrankenPHP with improved error handling
         log_info "🔍 Getting latest FrankenPHP version..."
-        
+
         # Try multiple methods to get version (compatible with different systems)
         FRANKEN_VERSION=""
-        
+
         # Method 1: Using sed (most portable)
         if [ -z "$FRANKEN_VERSION" ]; then
             FRANKEN_VERSION=$(curl -sL https://api.github.com/repos/php/frankenphp/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
         fi
-        
+
         # Method 2: Using awk as fallback
         if [ -z "$FRANKEN_VERSION" ]; then
             FRANKEN_VERSION=$(curl -sL https://api.github.com/repos/php/frankenphp/releases/latest | awk -F'"' '/"tag_name"/ {print $4; exit}')
         fi
-        
+
         # Method 3: Using python if available
         if [ -z "$FRANKEN_VERSION" ] && command -v python3 >/dev/null 2>&1; then
             FRANKEN_VERSION=$(curl -sL https://api.github.com/repos/php/frankenphp/releases/latest | python3 -c "import sys, json; print(json.load(sys.stdin)['tag_name'])" 2>/dev/null || echo "")
         fi
-        
+
         # Fallback to known working version
         if [ -z "$FRANKEN_VERSION" ]; then
             log_warning "⚠️  Failed to get latest version from GitHub API, using fallback version"
             FRANKEN_VERSION="v1.8.0"
         fi
-        
+
         FRANKEN_URL="https://github.com/php/frankenphp/releases/download/${FRANKEN_VERSION}/frankenphp-linux-${FRANKEN_ARCH}"
-        
+
         log_info "📥 Downloading FrankenPHP ${FRANKEN_VERSION} for ${FRANKEN_ARCH}..."
         log_info "URL: $FRANKEN_URL"
-        
+
         # Try wget first, then curl as fallback
         if command -v wget >/dev/null 2>&1; then
             if ! wget -O frankenphp "$FRANKEN_URL"; then
@@ -2093,13 +1987,13 @@ else
                 exit 1
             fi
         fi
-        
+
         # Verify download
         if [ ! -f "frankenphp" ] || [ ! -s "frankenphp" ]; then
             log_error "Downloaded FrankenPHP binary is empty or missing"
             exit 1
         fi
-        
+
         chmod +x frankenphp
         chown www-data:www-data frankenphp
 
@@ -2113,9 +2007,53 @@ fi
 (crontab -u www-data -l 2>/dev/null; echo "* * * * * cd $APP_DIR && php artisan schedule:run >> /dev/null 2>&1") | crontab -u www-data -
 CREATED_CRON_JOBS="$APP_NAME"
 
+# Create HTTP redirect service for port 80 (Laravel apps only)
+if [ -f "$APP_DIR/artisan" ]; then
+    log_info "📝 Creating HTTP redirect service for port 80..."
+    cat > /etc/systemd/system/frankenphp-$APP_NAME-http.service <<HTTP_SERVICE_EOF
+[Unit]
+Description=Laravel Octane FrankenPHP HTTP Server for $APP_NAME (Redirect to HTTPS)
+After=network.target mysql.service redis.service
+Wants=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=$APP_DIR
+ExecStart=/usr/bin/php artisan octane:frankenphp --host=$DOMAIN --port=80 --http-redirect --workers=2 --log-level=info
+ExecReload=/bin/kill -USR1 \$MAINPID
+KillMode=mixed
+KillSignal=SIGINT
+TimeoutStopSec=10
+Restart=always
+RestartSec=5
+SyslogIdentifier=octane-$APP_NAME-http
+
+Environment=APP_ENV=production
+Environment=APP_DEBUG=false
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=32768
+
+# Security settings - disabled to prevent namespace conflicts
+# NoNewPrivileges, PrivateTmp, ProtectSystem, ProtectHome disabled
+# to avoid systemd namespace issues (exit code 226/NAMESPACE)
+
+[Install]
+WantedBy=multi-user.target
+HTTP_SERVICE_EOF
+    CREATED_HTTP_SERVICE_FILE="/etc/systemd/system/frankenphp-$APP_NAME-http.service"
+    log_info "✅ HTTP redirect service created"
+fi
+
 # Reload services
 systemctl daemon-reload
 systemctl enable frankenphp-$APP_NAME
+if [ -f "$APP_DIR/artisan" ]; then
+    systemctl enable frankenphp-$APP_NAME-http
+fi
 supervisorctl reread && supervisorctl update
 
 log_info "✅ FrankenPHP Laravel app $APP_NAME created successfully!"
@@ -2129,19 +2067,25 @@ if [ -n "$GITHUB_REPO" ]; then
     log_info "🔧 Environment: Configured automatically"
 fi
 log_info ""
-log_info "🔧 To enable Auto HTTPS:"
-log_info "   Edit $APP_DIR/Caddyfile and change 'auto_https off' to 'auto_https on'"
+log_info "🚀 Native Laravel Octane FrankenPHP deployment configured!"
+log_info "   • HTTPS service: frankenphp-$APP_NAME (port 443)"
+log_info "   • HTTP redirect service: frankenphp-$APP_NAME-http (port 80)"
+log_info "   • Auto SSL certificates: Enabled"
+log_info "   • HTTP/2 & HTTP/3: Enabled"
 log_info ""
 if [ -n "$GITHUB_REPO" ]; then
     log_info "🚀 Your Laravel app is ready to start!"
     log_info "   Run: systemctl start frankenphp-$APP_NAME"
-    log_info "   Visit: https://$DOMAIN (or http://$DOMAIN for development)"
+    log_info "   Run: systemctl start frankenphp-$APP_NAME-http"
+    log_info "   Visit: https://$DOMAIN (auto SSL)"
+    log_info "   Visit: http://$DOMAIN (redirects to HTTPS)"
 else
     log_info "Next steps:"
     log_info "1. Deploy your app to $APP_DIR"
     log_info "2. Configure .env file"
     log_info "3. Run: systemctl start frankenphp-$APP_NAME"
-    log_info "4. Visit: https://$DOMAIN (or http://$DOMAIN for development)"
+    log_info "4. Run: systemctl start frankenphp-$APP_NAME-http"
+    log_info "5. Visit: https://$DOMAIN (auto SSL)"
 fi
 EOF
 
@@ -2554,33 +2498,33 @@ calculate_optimal_threads() {
 validate_port() {
     local port="$1"
     local check_in_use="${2:-true}"
-    
+
     if [ -z "$port" ]; then
         log_error "Port tidak boleh kosong!"
         return 1
     fi
-    
+
     if ! [[ "$port" =~ ^[0-9]+$ ]]; then
         log_error "Port harus berupa angka!"
         return 1
     fi
-    
+
     if [ $port -lt 1 ] || [ $port -gt 65535 ]; then
         log_error "Port harus dalam range 1-65535!"
         return 1
     fi
-    
+
     if [ $port -lt 1024 ]; then
         log_warning "Port $port adalah privileged port (< 1024), memerlukan akses root"
     fi
-    
+
     if [ "$check_in_use" = true ]; then
         if netstat -tuln 2>/dev/null | grep -q ":$port " || ss -tuln 2>/dev/null | grep -q ":$port "; then
             log_error "Port $port sudah digunakan!"
             return 1
         fi
     fi
-    
+
     log_info "✅ Port $port valid dan tersedia"
     return 0
 }
@@ -2683,7 +2627,7 @@ Type=simple
 User=www-data
 Group=www-data
 WorkingDirectory=$INSTANCE_DIR
-ExecStart=/usr/bin/php artisan octane:start --server=frankenphp --host=0.0.0.0 --port=$PORT --workers=$OPTIMAL_THREADS
+ExecStart=/usr/bin/php artisan octane:frankenphp --host=0.0.0.0 --port=$PORT --workers=$OPTIMAL_THREADS --max-requests=1000 --log-level=info
 ExecReload=/bin/kill -USR1 \$MAINPID
 KillMode=mixed
 KillSignal=SIGINT
@@ -2993,7 +2937,7 @@ elif [ "$ACTION" == "scale-down" ]; then
 # Main domain configuration
 $DOMAIN {
     encode zstd gzip
-    
+
     # Reverse proxy to Laravel Octane
     reverse_proxy localhost:8000 {
         header_up Host {http.request.host}
@@ -3001,12 +2945,12 @@ $DOMAIN {
         header_up X-Forwarded-For {http.request.remote}
         header_up X-Forwarded-Proto {http.request.scheme}
         header_up X-Forwarded-Port {http.request.port}
-        
+
         # Health check
         health_uri /health
         health_interval 30s
         health_timeout 5s
-        
+
         # Fail timeout
         fail_timeout 30s
         max_fails 3
