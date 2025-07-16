@@ -6,19 +6,19 @@
 # =============================================
 
 # Pastikan library ini hanya di-load sekali
-if [ -n "$SYSTEM_SETUP_LOADED" ]; then
+if [ -n "${SYSTEM_SETUP_LOADED:-}" ]; then
     return 0
 fi
 export SYSTEM_SETUP_LOADED=1
 
 # Load dependencies
-if [ -z "$SHARED_FUNCTIONS_LOADED" ]; then
+if [ -z "${SHARED_FUNCTIONS_LOADED:-}" ]; then
     source "$SCRIPT_DIR/lib/shared-functions.sh"
 fi
-if [ -z "$ERROR_HANDLER_LOADED" ]; then
+if [ -z "${ERROR_HANDLER_LOADED:-}" ]; then
     source "$SCRIPT_DIR/lib/error-handler.sh"
 fi
-if [ -z "$VALIDATION_LOADED" ]; then
+if [ -z "${VALIDATION_LOADED:-}" ]; then
     source "$SCRIPT_DIR/lib/validation.sh"
 fi
 
@@ -149,9 +149,6 @@ install_php() {
         "php${PHP_VERSION}-pdo"
         "php${PHP_VERSION}-tokenizer"
         "php${PHP_VERSION}-fileinfo"
-        "php${PHP_VERSION}-json"
-        "php${PHP_VERSION}-ctype"
-        "php${PHP_VERSION}-pcntl"
         "php${PHP_VERSION}-posix"
         "php${PHP_VERSION}-sockets"
     )
@@ -307,22 +304,8 @@ install_redis() {
     log_info "✅ Redis installed successfully"
 }
 
-install_frankenphp_for_octane() {
-    log_info "🚀 Installing FrankenPHP for Laravel Octane..."
-    
-    # FrankenPHP akan di-install otomatis oleh Laravel Octane
-    # Kita hanya perlu memastikan dependencies tersedia
-    
-    # Install dependencies for FrankenPHP
-    if ! apt-get install -y -qq \
-        libnss3-dev \
-        libatk-bridge2.0-dev \
-        libdrm-dev \
-        libgtk-3-dev \
-        libgbm-dev; then
-        handle_error "Failed to install FrankenPHP dependencies" $ERROR_DEPENDENCY
-        return 1
-    fi
+prepare_frankenphp_directories() {
+    log_info "� Preparing FrankenPHP directories..."
     
     # Create FrankenPHP directories
     ensure_directory "/var/lib/frankenphp"
@@ -332,8 +315,7 @@ install_frankenphp_for_octane() {
     chown -R www-data:www-data /var/lib/frankenphp
     chown -R www-data:www-data /var/log/frankenphp
     
-    log_info "✅ FrankenPHP dependencies installed successfully"
-    log_info "📝 FrankenPHP binary will be downloaded by Laravel Octane during app installation"
+    log_info "✅ FrankenPHP directories prepared"
 }
 
 setup_firewall() {
@@ -421,7 +403,7 @@ setup_system() {
     install_nodejs || return 1
     install_mysql || return 1
     install_redis || return 1
-    install_frankenphp_for_octane || return 1
+    prepare_frankenphp_directories || return 1
     setup_firewall || return 1
     setup_fail2ban || return 1
     create_directories || return 1

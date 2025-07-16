@@ -6,7 +6,7 @@
 # =============================================
 
 # Pastikan library ini hanya di-load sekali
-if [ -n "$SSL_MANAGER_LOADED" ]; then
+if [ -n "${SSL_MANAGER_LOADED:-}" ]; then
     return 0
 fi
 export SSL_MANAGER_LOADED=1

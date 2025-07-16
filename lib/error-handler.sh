@@ -6,13 +6,13 @@
 # =============================================
 
 # Pastikan module ini hanya di-load sekali
-if [ -n "$ERROR_HANDLER_LOADED" ]; then
+if [ -n "${ERROR_HANDLER_LOADED:-}" ]; then
     return 0
 fi
 export ERROR_HANDLER_LOADED=1
 
 # Load shared functions if not already loaded
-if [ -z "$SHARED_FUNCTIONS_LOADED" ]; then
+if [ -z "${SHARED_FUNCTIONS_LOADED:-}" ]; then
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     source "$SCRIPT_DIR/shared-functions.sh"
 fi

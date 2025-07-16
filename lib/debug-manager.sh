@@ -6,7 +6,7 @@
 # =============================================
 
 # Pastikan library ini hanya di-load sekali
-if [ -n "$DEBUG_MANAGER_LOADED" ]; then
+if [ -n "${DEBUG_MANAGER_LOADED:-}" ]; then
     return 0
 fi
 export DEBUG_MANAGER_LOADED=1

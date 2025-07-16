@@ -6,7 +6,7 @@
 # =============================================
 
 # Pastikan library ini hanya di-load sekali
-if [ -n "$OCTANE_MANAGER_LOADED" ]; then
+if [ -n "${OCTANE_MANAGER_LOADED:-}" ]; then
     return 0
 fi
 export OCTANE_MANAGER_LOADED=1
@@ -83,7 +83,7 @@ octane_start() {
     log_info "▶️  Starting Octane server for app: $app_name"
     
     # Start systemd service
-    if systemctl start "laravel-octane-$app_name"; then
+    if systemctl start "octane-$app_name"; then
         log_info "✅ Octane server started successfully"
     else
         log_error "Failed to start Octane server"
@@ -102,7 +102,7 @@ octane_stop() {
     log_info "⏹️  Stopping Octane server for app: $app_name"
     
     # Stop systemd service
-    if systemctl stop "laravel-octane-$app_name"; then
+    if systemctl stop "octane-$app_name"; then
         log_info "✅ Octane server stopped successfully"
     else
         log_error "Failed to stop Octane server"
@@ -121,7 +121,7 @@ octane_restart() {
     log_info "🔄 Restarting Octane server for app: $app_name"
     
     # Restart systemd service
-    if systemctl restart "laravel-octane-$app_name"; then
+    if systemctl restart "octane-$app_name"; then
         log_info "✅ Octane server restarted successfully"
     else
         log_error "Failed to restart Octane server"
@@ -140,7 +140,7 @@ octane_status() {
     log_info "📊 Octane server status for app: $app_name"
     
     # Show systemd service status
-    systemctl status "laravel-octane-$app_name" --no-pager
+    systemctl status "octane-$app_name" --no-pager
 }
 
 octane_create_service() {

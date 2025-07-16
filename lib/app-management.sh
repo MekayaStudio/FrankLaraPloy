@@ -6,7 +6,7 @@
 # =============================================
 
 # Pastikan library ini hanya di-load sekali
-if [ -n "$APP_MANAGEMENT_LOADED" ]; then
+if [ -n "${APP_MANAGEMENT_LOADED:-}" ]; then
     return 0
 fi
 export APP_MANAGEMENT_LOADED=1
@@ -18,7 +18,7 @@ export APP_MANAGEMENT_LOADED=1
 install_app() {
     local app_name="$1"
     local domain="$2"
-    local github_repo="$3"
+    local github_repo="${3:-}"
     local db_name="${4:-${app_name}_db}"
     local octane_mode="${5:-smart}"  # smart, enhanced, or basic
 
@@ -67,6 +67,9 @@ install_app() {
     systemctl enable "octane-$app_name.service"
     systemctl start "octane-$app_name.service"
 
+    # Save app configuration
+    save_app_config "$app_name" "$domain" "$app_dir" "$db_name"
+
     log_info ""
     log_info "🎉 App $app_name installed successfully!"
     log_info "🌐 Visit: https://$domain"
@@ -113,11 +116,28 @@ setup_laravel_app() {
     else
         log_info "📁 Creating fresh Laravel app with composer"
         
-        # Create Laravel project as www-data user
-        sudo -u www-data composer create-project laravel/laravel "$app_dir"
+        # Ensure APPS_BASE_DIR is defined
+        if [ -z "$APPS_BASE_DIR" ]; then
+            APPS_BASE_DIR="/opt/laravel-apps"
+        fi
         
-        # Navigate to directory
-        cd "$app_dir"
+        # Create parent directory if it doesn't exist
+        mkdir -p "$APPS_BASE_DIR"
+        
+        # Set proper ownership for the base directory
+        chown -R www-data:www-data "$APPS_BASE_DIR"
+        
+        # Create Laravel project as www-data user with absolute path
+        cd "$APPS_BASE_DIR"
+        
+        # Create the project in the base directory
+        if ! sudo -u www-data composer create-project laravel/laravel "$app_name"; then
+            log_error "Failed to create Laravel project"
+            return 1
+        fi
+        
+        # Navigate to the created directory
+        cd "$app_name"
     fi
 
     # Setup Laravel environment (as www-data)
@@ -315,6 +335,168 @@ install_octane_enhanced() {
     log_info "   Optimization: ✅ COMPLETE"
     log_info ""
     log_info "✅ Laravel Octane setup completed for $app_name"
+}
+
+# Smart install with automatic detection and optimization
+install_octane_smart() {
+    local app_name="$1"
+    local app_dir="$2"
+    local domain="$3"
+
+    cd "$app_dir"
+
+    log_info "🧠 Smart Laravel Octane installation for $app_name"
+    log_info "📁 Working directory: $app_dir"
+
+    # Step 1: Detect Laravel version and current setup
+    local laravel_version=""
+    if [ -f "composer.json" ]; then
+        laravel_version=$(grep -o '"laravel/framework": "[^"]*"' composer.json | sed 's/.*": "//' | sed 's/".*//')
+        log_info "🔍 Laravel version detected: $laravel_version"
+    fi
+
+    # Step 2: Check if Octane is already installed
+    if check_octane_installed; then
+        log_info "✅ Laravel Octane already installed"
+        
+        # Check if FrankenPHP is properly configured
+        if check_frankenphp_configured; then
+            log_info "✅ FrankenPHP already configured"
+        else
+            log_info "🔧 Configuring FrankenPHP for existing Octane..."
+            configure_frankenphp_proper "$app_name" "$domain"
+        fi
+    else
+        log_info "📦 Installing Laravel Octane with FrankenPHP..."
+        
+        # Install Octane as www-data user
+        if ! sudo -u www-data composer require laravel/octane; then
+            log_error "Failed to install Laravel Octane"
+            return 1
+        fi
+
+        # Configure Octane with FrankenPHP
+        log_info "🔧 Configuring Octane with FrankenPHP..."
+        if ! sudo -u www-data php artisan octane:install --server=frankenphp; then
+            log_error "Failed to configure Octane with FrankenPHP"
+            return 1
+        fi
+        
+        log_info "✅ Laravel Octane with FrankenPHP installed successfully"
+    fi
+
+    # Step 3: Smart configuration based on environment
+    log_info "🔧 Applying smart configurations..."
+    
+    # Setup production environment
+    setup_production_env "$domain"
+    
+    # Setup FrankenPHP-specific configuration
+    setup_frankenphp_config "$app_name" "$domain"
+    
+    # Create TLS storage directory
+    setup_tls_storage "$app_name"
+    
+    # Optimize Laravel app
+    optimize_laravel_app
+    
+    # Step 4: Performance optimization based on system resources
+    optimize_for_system_resources "$app_name"
+    
+    log_info "✅ Smart Laravel Octane installation completed for $app_name"
+}
+
+# Performance optimization based on system resources and existing apps
+optimize_for_system_resources() {
+    local app_name="$1"
+    
+    log_info "⚡ Optimizing for system resources with multi-app awareness..."
+    
+    # Get system resources
+    local total_memory=$(free -m | awk 'NR==2{print $2}')
+    local available_memory=$(free -m | awk 'NR==2{print $7}')
+    local used_memory=$(free -m | awk 'NR==2{print $3}')
+    local cpu_cores=$(nproc)
+    local load_avg=$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | sed 's/,//')
+    
+    # Calculate memory usage percentage
+    local memory_usage_percent=$(echo "scale=2; $used_memory * 100 / $total_memory" | bc -l 2>/dev/null || echo "0")
+    
+    # Count existing running apps
+    local running_apps=$(count_running_apps)
+    local total_apps_after_install=$((running_apps + 1))
+    
+    log_info "📊 System resources: ${total_memory}MB RAM, ${cpu_cores} CPU cores"
+    log_info "📊 Memory usage: ${memory_usage_percent}%, Load average: ${load_avg}"
+    log_info "📊 Running apps: ${running_apps}, Total after install: ${total_apps_after_install}"
+    
+    # Calculate safe resource allocation for multi-app
+    local safe_memory_per_app=$(calculate_safe_memory_per_app "$total_memory" "$total_apps_after_install")
+    local safe_workers_per_app=$(calculate_safe_workers_per_app "$cpu_cores" "$total_apps_after_install")
+    
+    # Check if we can safely install another app
+    if ! check_resource_availability "$total_memory" "$cpu_cores" "$total_apps_after_install"; then
+        log_error "⚠️  RESOURCE WARNING: Installing another app may cause performance issues!"
+        log_error "   Current apps: $running_apps"
+        log_error "   Recommended max apps for this server: $(get_recommended_max_apps "$total_memory" "$cpu_cores")"
+        
+        read -p "Do you want to continue with reduced performance? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log_info "Installation cancelled for safety"
+            return 1
+        fi
+    fi
+    
+    # Calculate workers and max_requests based on available resources
+    local workers=$safe_workers_per_app
+    local max_requests=$(calculate_max_requests "$safe_memory_per_app")
+    
+    # Apply minimum and maximum limits
+    [ $workers -lt 1 ] && workers=1
+    [ $workers -gt 8 ] && workers=8
+    [ $max_requests -lt 100 ] && max_requests=100
+    [ $max_requests -gt 3000 ] && max_requests=3000
+    
+    log_info "🎯 Multi-app optimized settings:"
+    log_info "   Workers: ${workers} (safe allocation for ${total_apps_after_install} apps)"
+    log_info "   Max requests: ${max_requests}"
+    log_info "   Estimated memory per app: ${safe_memory_per_app}MB"
+    log_info "   Estimated total memory usage: $((safe_memory_per_app * total_apps_after_install))MB"
+    
+    # Update .env with optimized settings
+    if [ -f ".env" ]; then
+        # Remove existing Octane settings
+        sed -i '/^OCTANE_/d' .env
+        
+        # Add multi-app optimized settings
+        cat >> .env << EOF
+
+# Multi-App Optimized FrankenPHP Settings
+OCTANE_SERVER=frankenphp
+OCTANE_WORKERS=$workers
+OCTANE_MAX_REQUESTS=$max_requests
+OCTANE_LOG_LEVEL=info
+
+# Performance Settings
+OCTANE_TICK_INTERVAL=1000
+OCTANE_TASK_WORKERS=auto
+OCTANE_WATCH=false
+
+# Multi-app metadata
+OCTANE_MULTIAPP_TOTAL_APPS=$total_apps_after_install
+OCTANE_MULTIAPP_MEMORY_ALLOCATION=${safe_memory_per_app}MB
+EOF
+        
+        # Set proper ownership
+        chown www-data:www-data .env
+        chmod 600 .env
+    fi
+    
+    # Save resource allocation info
+    save_resource_allocation "$app_name" "$workers" "$max_requests" "$safe_memory_per_app" "$total_apps_after_install"
+    
+    log_info "✅ Multi-app performance optimization completed"
 }
 
 configure_frankenphp_proper() {
@@ -714,8 +896,7 @@ remove_app() {
     # Step 4: Remove database if requested
     if [ "$remove_database" = true ]; then
         log_info "🗄️  Removing database..."
-        load_module "database"
-
+        
         # Get MySQL root password using the database manager function
         local root_password=$(get_mysql_root_password)
         if [ $? -eq 0 ]; then
@@ -825,8 +1006,7 @@ remove_app_force() {
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         log_info "🗄️  Attempting database removal with common naming..."
-        load_module "database"
-
+        
         local root_password=$(get_mysql_root_password)
         if [ $? -eq 0 ]; then
             local mysql_cmd
@@ -1368,3 +1548,248 @@ check_frankenphp_configured() {
 # =============================================
 # Installation Helper Functions
 # =============================================
+
+save_app_config() {
+    local app_name="$1"
+    local domain="$2"
+    local app_dir="$3"
+    local db_name="$4"
+    
+    log_info "📝 Saving app configuration for $app_name"
+    
+    # Create config directory if it doesn't exist
+    mkdir -p "$CONFIG_DIR"
+    
+    # Create config file
+    cat > "$CONFIG_DIR/$app_name.conf" << EOF
+# Laravel App Configuration for $app_name
+APP_NAME="$app_name"
+DOMAIN="$domain"
+APP_DIR="$app_dir"
+DB_NAME="$db_name"
+DB_USER="root"
+DB_PASS=""
+CREATED_AT="$(date)"
+EOF
+    
+    # Set proper permissions
+    chmod 600 "$CONFIG_DIR/$app_name.conf"
+    
+    log_info "✅ App configuration saved"
+}
+
+# =============================================
+# Multi-App Resource Management Functions
+# =============================================
+
+count_running_apps() {
+    local count=0
+    for service in $(systemctl list-units --type=service --state=running | grep "octane-" | awk '{print $1}'); do
+        count=$((count + 1))
+    done
+    echo $count
+}
+
+calculate_safe_memory_per_app() {
+    local total_memory="$1"
+    local total_apps="$2"
+    
+    # Reserve 20% for system
+    local usable_memory=$((total_memory * 80 / 100))
+    
+    # Calculate memory per app with safety margin
+    local memory_per_app=$((usable_memory / total_apps))
+    
+    # Apply minimum and maximum limits
+    [ $memory_per_app -lt 256 ] && memory_per_app=256
+    [ $memory_per_app -gt 2048 ] && memory_per_app=2048
+    
+    echo $memory_per_app
+}
+
+calculate_safe_workers_per_app() {
+    local cpu_cores="$1"
+    local total_apps="$2"
+    
+    # Calculate max workers we can safely allocate
+    local max_total_workers=$((cpu_cores * 2))
+    local workers_per_app=$((max_total_workers / total_apps))
+    
+    # Apply minimum and maximum limits
+    [ $workers_per_app -lt 1 ] && workers_per_app=1
+    [ $workers_per_app -gt 8 ] && workers_per_app=8
+    
+    echo $workers_per_app
+}
+
+calculate_max_requests() {
+    local memory_per_app="$1"
+    
+    # Calculate max_requests based on memory allocation
+    local max_requests=$((memory_per_app * 2))
+    
+    # Apply sensible limits
+    [ $max_requests -lt 100 ] && max_requests=100
+    [ $max_requests -gt 3000 ] && max_requests=3000
+    
+    echo $max_requests
+}
+
+check_resource_availability() {
+    local total_memory="$1"
+    local cpu_cores="$2"
+    local total_apps_after_install="$3"
+    
+    # Check if we exceed recommended limits
+    local max_apps=$(get_recommended_max_apps "$total_memory" "$cpu_cores")
+    
+    if [ $total_apps_after_install -gt $max_apps ]; then
+        return 1
+    fi
+    
+    # Check if memory per app would be too low
+    local memory_per_app=$(calculate_safe_memory_per_app "$total_memory" "$total_apps_after_install")
+    if [ $memory_per_app -lt 256 ]; then
+        return 1
+    fi
+    
+    return 0
+}
+
+get_recommended_max_apps() {
+    local total_memory="$1"
+    local cpu_cores="$2"
+    
+    # Calculate based on memory (min 256MB per app)
+    local max_apps_by_memory=$((total_memory * 80 / 100 / 256))
+    
+    # Calculate based on CPU (max 2 workers per CPU core)
+    local max_apps_by_cpu=$((cpu_cores * 2))
+    
+    # Take the minimum of both
+    local max_apps=$max_apps_by_memory
+    [ $max_apps_by_cpu -lt $max_apps ] && max_apps=$max_apps_by_cpu
+    
+    # Apply absolute limits
+    [ $max_apps -lt 1 ] && max_apps=1
+    [ $max_apps -gt 50 ] && max_apps=50
+    
+    echo $max_apps
+}
+
+save_resource_allocation() {
+    local app_name="$1"
+    local workers="$2"
+    local max_requests="$3"
+    local memory_allocation="$4"
+    local total_apps="$5"
+    
+    # Save to config file
+    local config_file="$CONFIG_DIR/$app_name.conf"
+    if [ -f "$config_file" ]; then
+        # Add resource allocation info
+        cat >> "$config_file" << EOF
+
+# Resource Allocation (Auto-generated)
+WORKERS=$workers
+MAX_REQUESTS=$max_requests
+MEMORY_ALLOCATION=${memory_allocation}MB
+TOTAL_APPS_AT_INSTALL=$total_apps
+ALLOCATION_TIMESTAMP="$(date)"
+EOF
+    fi
+}
+
+show_multi_app_resource_usage() {
+    log_info "📊 Multi-App Resource Usage Summary:"
+    echo ""
+    
+    local total_memory=$(free -m | awk 'NR==2{print $2}')
+    local used_memory=$(free -m | awk 'NR==2{print $3}')
+    local cpu_cores=$(nproc)
+    local load_avg=$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | sed 's/,//')
+    
+    local running_apps=$(count_running_apps)
+    local max_recommended=$(get_recommended_max_apps "$total_memory" "$cpu_cores")
+    
+    printf "%-20s %-10s %-10s %-10s %-10s\n" "App Name" "Workers" "Memory" "Status" "Port"
+    echo "=========================================================================="
+    
+    local total_workers=0
+    local total_allocated_memory=0
+    
+    for app_dir in "$APPS_BASE_DIR"/*; do
+        if [ -d "$app_dir" ]; then
+            local app_name=$(basename "$app_dir")
+            local env_file="$app_dir/.env"
+            
+            if [ -f "$env_file" ]; then
+                # Read workers from .env file
+                local workers=$(grep "^OCTANE_WORKERS=" "$env_file" 2>/dev/null | cut -d'=' -f2 || echo "N/A")
+                
+                # Read memory allocation from .env file
+                local memory=$(grep "^OCTANE_MULTIAPP_MEMORY_ALLOCATION=" "$env_file" 2>/dev/null | cut -d'=' -f2 || echo "")
+                
+                # If no memory allocation found, estimate based on workers
+                if [ -z "$memory" ] && [ "$workers" != "N/A" ]; then
+                    # Estimate ~80MB per worker as default
+                    local estimated_memory=$((workers * 80))
+                    memory="${estimated_memory}MB"
+                elif [ -z "$memory" ]; then
+                    memory="N/A"
+                fi
+                
+                local status="Stopped"
+                if systemctl is-active --quiet "octane-$app_name"; then
+                    status="Running"
+                fi
+                
+                # Get port from service file or default to 443 for HTTPS
+                local port="443"
+                if [ -f "/etc/systemd/system/octane-$app_name.service" ]; then
+                    local service_port=$(grep "ExecStart=" "/etc/systemd/system/octane-$app_name.service" | grep -o "port=[0-9]*" | cut -d'=' -f2 2>/dev/null)
+                    if [ -n "$service_port" ]; then
+                        port="$service_port"
+                    fi
+                fi
+                
+                printf "%-20s %-10s %-10s %-10s %-10s\n" "$app_name" "$workers" "$memory" "$status" "$port"
+                
+                # Calculate totals only for running apps
+                if [ "$workers" != "N/A" ] && [ "$status" = "Running" ]; then
+                    total_workers=$((total_workers + workers))
+                fi
+                
+                if [ "$memory" != "N/A" ] && [ "$status" = "Running" ]; then
+                    local mem_num=$(echo "$memory" | sed 's/MB//')
+                    if [[ "$mem_num" =~ ^[0-9]+$ ]]; then
+                        total_allocated_memory=$((total_allocated_memory + mem_num))
+                    fi
+                fi
+            fi
+        fi
+    done
+    
+    echo "=========================================================================="
+    echo ""
+    log_info "📈 Resource Summary:"
+    log_info "   Running apps: $running_apps / $max_recommended (recommended max)"
+    log_info "   Total workers: $total_workers / $((cpu_cores * 2)) (max safe)"
+    log_info "   Allocated memory: ${total_allocated_memory}MB / ${total_memory}MB (total)"
+    log_info "   Memory usage: $(echo "scale=1; $used_memory * 100 / $total_memory" | bc -l)%"
+    log_info "   Load average: $load_avg"
+    
+    # Show warnings if needed
+    if [ $running_apps -gt $max_recommended ]; then
+        log_warning "⚠️  WARNING: Too many apps running! Performance may be degraded."
+    fi
+    
+    if [ $total_workers -gt $((cpu_cores * 2)) ]; then
+        log_warning "⚠️  WARNING: Total workers exceed CPU capacity!"
+    fi
+    
+    local memory_usage_percent=$(echo "scale=0; $used_memory * 100 / $total_memory" | bc -l)
+    if [ $memory_usage_percent -gt 80 ]; then
+        log_warning "⚠️  WARNING: High memory usage detected!"
+    fi
+}

@@ -85,6 +85,7 @@ COMMANDS:
     install <app> <domain> [repo]   Install new Laravel app
     remove <app>                    Remove Laravel app
     list                           List all installed apps
+    resources                      Show multi-app resource usage
     status <app>                   Show app status
     logs <app> [lines]             Show app logs
     
@@ -174,6 +175,10 @@ main() {
             
         "list")
             list_apps
+            ;;
+            
+        "resources")
+            show_multi_app_resource_usage
             ;;
             
         "logs")

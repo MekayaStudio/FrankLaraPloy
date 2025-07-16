@@ -6,16 +6,16 @@
 # =============================================
 
 # Pastikan library ini hanya di-load sekali
-if [ -n "$SYSTEMD_MANAGER_LOADED" ]; then
+if [ -n "${SYSTEMD_MANAGER_LOADED:-}" ]; then
     return 0
 fi
 export SYSTEMD_MANAGER_LOADED=1
 
 # Load dependencies
-if [ -z "$SHARED_FUNCTIONS_LOADED" ]; then
+if [ -z "${SHARED_FUNCTIONS_LOADED:-}" ]; then
     source "$SCRIPT_DIR/lib/shared-functions.sh"
 fi
-if [ -z "$ERROR_HANDLER_LOADED" ]; then
+if [ -z "${ERROR_HANDLER_LOADED:-}" ]; then
     source "$SCRIPT_DIR/lib/error-handler.sh"
 fi
 
@@ -30,7 +30,7 @@ create_octane_service() {
     log_info "🔧 Creating Octane systemd service for app: $app_name"
     
     local app_dir="$APPS_BASE_DIR/$app_name"
-    local service_file="/etc/systemd/system/laravel-octane-${app_name}.service"
+    local service_file="/etc/systemd/system/octane-${app_name}.service"
     
     # Create service file
     cat > "$service_file" << EOF
@@ -69,7 +69,7 @@ LimitNPROC=4096
 # Logging
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=laravel-octane-$app_name
+SyslogIdentifier=octane-$app_name
 
 [Install]
 WantedBy=multi-user.target
@@ -81,7 +81,7 @@ EOF
     # Reload systemd
     systemctl daemon-reload
     
-    log_info "✅ Octane service created: laravel-octane-$app_name"
+    log_info "✅ Octane service created: octane-$app_name"
 }
 
 create_queue_worker_service() {
@@ -154,7 +154,7 @@ systemd_check_service() {
 
     # Handle service name variations
     if [[ "$service_name" != laravel-* ]]; then
-        service_name="laravel-octane-$service_name"
+        service_name="octane-$service_name"
     fi
 
     log_info "🔍 Checking service: $service_name"
@@ -197,11 +197,11 @@ systemd_fix_service() {
     fi
     
     # Stop services
-    systemctl stop "laravel-octane-$app_name" 2>/dev/null || true
+    systemctl stop "octane-$app_name" 2>/dev/null || true
     systemctl stop "laravel-queue-$app_name" 2>/dev/null || true
     
     # Remove old service files
-    rm -f "/etc/systemd/system/laravel-octane-$app_name.service"
+    rm -f "/etc/systemd/system/octane-$app_name.service"
     rm -f "/etc/systemd/system/laravel-queue-$app_name.service"
     
     # Reload systemd
@@ -212,8 +212,8 @@ systemd_fix_service() {
     create_queue_worker_service "$app_name"
     
     # Enable and start services
-    systemctl enable "laravel-octane-$app_name"
-    systemctl start "laravel-octane-$app_name"
+    systemctl enable "octane-$app_name"
+    systemctl start "octane-$app_name"
     
     # Enable queue worker if it has queue configuration
     if cd "$app_dir" && php artisan list | grep -q "queue:work"; then
@@ -256,10 +256,10 @@ systemd_list_services() {
     printf "%-30s %-10s %-10s %-s\n" "------------" "------" "-------" "-----------"
     
     # List all Laravel Octane services
-    for service_file in /etc/systemd/system/laravel-octane-*.service; do
+    for service_file in /etc/systemd/system/octane-*.service; do
         if [ -f "$service_file" ]; then
             local service_name=$(basename "$service_file" .service)
-            local app_name=${service_name#laravel-octane-}
+            local app_name=${service_name#octane-}
             
             # Get service status
             local status="inactive"
@@ -308,8 +308,8 @@ restart_app_services() {
     log_info "🔄 Restarting services for app: $app_name"
     
     # Restart Octane service
-    if systemctl is-active --quiet "laravel-octane-$app_name"; then
-        systemctl restart "laravel-octane-$app_name"
+    if systemctl is-active --quiet "octane-$app_name"; then
+        systemctl restart "octane-$app_name"
         log_info "✅ Restarted Octane service"
     fi
     
@@ -326,8 +326,8 @@ stop_app_services() {
     log_info "🛑 Stopping services for app: $app_name"
     
     # Stop Octane service
-    if systemctl is-active --quiet "laravel-octane-$app_name"; then
-        systemctl stop "laravel-octane-$app_name"
+    if systemctl is-active --quiet "octane-$app_name"; then
+        systemctl stop "octane-$app_name"
         log_info "✅ Stopped Octane service"
     fi
     
@@ -344,8 +344,8 @@ start_app_services() {
     log_info "▶️  Starting services for app: $app_name"
     
     # Start Octane service
-    if systemctl is-enabled --quiet "laravel-octane-$app_name"; then
-        systemctl start "laravel-octane-$app_name"
+    if systemctl is-enabled --quiet "octane-$app_name"; then
+        systemctl start "octane-$app_name"
         log_info "✅ Started Octane service"
     fi
     
@@ -394,7 +394,7 @@ monitor_service_health() {
 get_service_port() {
     local app_name="$1"
     
-    local service_file="/etc/systemd/system/laravel-octane-$app_name.service"
+    local service_file="/etc/systemd/system/octane-$app_name.service"
     if [ -f "$service_file" ]; then
         # Extract port from service file
         local port=$(grep -o '\--port=[0-9]\+' "$service_file" | cut -d'=' -f2)
@@ -414,10 +414,10 @@ cleanup_orphaned_services() {
     local cleaned_count=0
     
     # Check Laravel Octane services
-    for service_file in /etc/systemd/system/laravel-octane-*.service; do
+    for service_file in /etc/systemd/system/octane-*.service; do
         if [ -f "$service_file" ]; then
             local service_name=$(basename "$service_file" .service)
-            local app_name=${service_name#laravel-octane-}
+            local app_name=${service_name#octane-}
             
             # Check if app directory exists
             if [ ! -d "$APPS_BASE_DIR/$app_name" ]; then

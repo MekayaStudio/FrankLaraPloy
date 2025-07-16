@@ -6,25 +6,25 @@
 # =============================================
 
 # Pastikan library ini hanya di-load sekali
-if [ -n "$LARAVEL_MANAGER_LOADED" ]; then
+if [ -n "${LARAVEL_MANAGER_LOADED:-}" ]; then
     return 0
 fi
 export LARAVEL_MANAGER_LOADED=1
 
 # Load dependencies
-if [ -z "$SHARED_FUNCTIONS_LOADED" ]; then
+if [ -z "${SHARED_FUNCTIONS_LOADED:-}" ]; then
     source "$SCRIPT_DIR/lib/shared-functions.sh"
 fi
-if [ -z "$ERROR_HANDLER_LOADED" ]; then
+if [ -z "${ERROR_HANDLER_LOADED:-}" ]; then
     source "$SCRIPT_DIR/lib/error-handler.sh"
 fi
-if [ -z "$OCTANE_MANAGER_LOADED" ]; then
+if [ -z "${OCTANE_MANAGER_LOADED:-}" ]; then
     source "$SCRIPT_DIR/lib/octane-manager.sh"
 fi
-if [ -z "$DATABASE_MANAGER_LOADED" ]; then
+if [ -z "${DATABASE_MANAGER_LOADED:-}" ]; then
     source "$SCRIPT_DIR/lib/database-manager.sh"
 fi
-if [ -z "$SYSTEMD_MANAGER_LOADED" ]; then
+if [ -z "${SYSTEMD_MANAGER_LOADED:-}" ]; then
     source "$SCRIPT_DIR/lib/systemd-manager.sh"
 fi
 
@@ -43,11 +43,11 @@ create_laravel_app() {
     
     # Create app directory
     ensure_directory "$app_dir"
-    cd "$app_dir"
     
     if [ -n "$github_repo" ]; then
         # Clone from GitHub
         log_info "📥 Cloning from GitHub: $github_repo"
+        cd "$app_dir"
         if ! git clone "$github_repo" .; then
             handle_error "Failed to clone repository: $github_repo" $ERROR_NETWORK
             return 1
@@ -77,10 +77,12 @@ create_laravel_app() {
     else
         # Create new Laravel project
         log_info "🆕 Creating new Laravel project..."
-        if ! composer create-project laravel/laravel .; then
+        cd / # Change to root directory first
+        if ! composer create-project laravel/laravel "$app_dir"; then
             handle_error "Failed to create Laravel project" $ERROR_DEPENDENCY
             return 1
         fi
+        cd "$app_dir"
     fi
     
     # Set proper permissions

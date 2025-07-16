@@ -6,16 +6,16 @@
 # =============================================
 
 # Pastikan module ini hanya di-load sekali
-if [ -n "$VALIDATION_LOADED" ]; then
+if [ -n "${VALIDATION_LOADED:-}" ]; then
     return 0
 fi
 export VALIDATION_LOADED=1
 
 # Load dependencies
-if [ -z "$SHARED_FUNCTIONS_LOADED" ]; then
+if [ -z "${SHARED_FUNCTIONS_LOADED:-}" ]; then
     source "$SCRIPT_DIR/lib/shared-functions.sh"
 fi
-if [ -z "$ERROR_HANDLER_LOADED" ]; then
+if [ -z "${ERROR_HANDLER_LOADED:-}" ]; then
     source "$SCRIPT_DIR/lib/error-handler.sh"
 fi
 

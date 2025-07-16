@@ -7,7 +7,7 @@
 # =============================================
 
 # Pastikan library ini hanya di-load sekali
-if [ -n "$CONNECTION_MANAGER_LOADED" ]; then
+if [ -n "${CONNECTION_MANAGER_LOADED:-}" ]; then
     return 0
 fi
 export CONNECTION_MANAGER_LOADED=1

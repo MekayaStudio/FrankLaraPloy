@@ -7,7 +7,7 @@
 # =============================================
 
 # Pastikan library ini hanya di-load sekali
-if [ -n "$SHARED_FUNCTIONS_LOADED" ]; then
+if [ -n "${SHARED_FUNCTIONS_LOADED:-}" ]; then
     return 0
 fi
 export SHARED_FUNCTIONS_LOADED=1
@@ -33,10 +33,10 @@ THREAD_MEMORY_USAGE="${THREAD_MEMORY_USAGE:-80}"
 MAX_APPS_PER_SERVER="${MAX_APPS_PER_SERVER:-10}"
 
 # Paths (can be overridden by config file)
-APPS_BASE_DIR="${APPS_BASE_DIR:-/opt/laravel-apps}"
-LOG_DIR="${LOG_DIR:-/var/log/frankenphp}"
-BACKUP_DIR="${BACKUP_DIR:-/var/backups/laravel-apps}"
-CONFIG_DIR="${CONFIG_DIR:-/etc/laravel-apps}"
+export APPS_BASE_DIR="${APPS_BASE_DIR:-/opt/laravel-apps}"
+export LOG_DIR="${LOG_DIR:-/var/log/frankenphp}"
+export BACKUP_DIR="${BACKUP_DIR:-/var/backups/laravel-apps}"
+export CONFIG_DIR="${CONFIG_DIR:-/etc/laravel-apps}"
 
 # =============================================
 # Logging Functions
