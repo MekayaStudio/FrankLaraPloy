@@ -344,7 +344,7 @@ DOMAIN=$domain
 DB_NAME=$db_name
 DB_USER=$db_user
 DB_PASS=$db_pass
-CREATED_AT=$(date '+%Y-%m-%d %H:%M:%S')
+CREATED_AT="$(date '+%Y-%m-%d %H:%M:%S')"
 EOF
 
     log_info "✅ Database configured: $db_name"
@@ -412,28 +412,218 @@ remove_app() {
         return 0
     fi
 
-    # Stop and disable service
+    log_info "🗑️  Starting removal process for $app_name"
+
+    # Step 1: Load database config BEFORE removing anything
+    local db_name=""
+    local db_user=""
+    local db_pass=""
+    local config_file="/etc/laravel-apps/$app_name.conf"
+
+    if [ -f "$config_file" ]; then
+        log_info "📖 Loading database configuration..."
+        # Use separate shell to avoid variables pollution
+        eval "$(grep -E '^(DB_NAME|DB_USER|DB_PASS)=' "$config_file" 2>/dev/null || true)"
+        db_name="$DB_NAME"
+        db_user="$DB_USER"
+        db_pass="$DB_PASS"
+    else
+        log_warning "⚠️  Config file not found: $config_file"
+        log_info "💡 Will attempt to derive database info from app name"
+        db_name="${app_name}_db"
+        db_user="${app_name}_user"
+    fi
+
+    # Step 2: Ask about database removal first
+    local remove_database=false
+    if [ -n "$db_name" ]; then
+        read -p "Remove database '$db_name' too? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            remove_database=true
+        fi
+    fi
+
+    # Step 3: Stop and disable systemd service
+    log_info "🛑 Stopping systemd service..."
+    systemctl stop "octane-$app_name.service" 2>/dev/null || true
+    systemctl disable "octane-$app_name.service" 2>/dev/null || true
+    rm -f "/etc/systemd/system/octane-$app_name.service"
+    log_info "✅ Service stopped and removed"
+
+    # Step 4: Remove database if requested
+    if [ "$remove_database" = true ]; then
+        log_info "🗄️  Removing database..."
+        load_module "database"
+
+        # Get MySQL root password using the database manager function
+        local root_password=$(get_mysql_root_password)
+        if [ $? -eq 0 ]; then
+            local mysql_cmd
+            if [ -n "$root_password" ]; then
+                mysql_cmd="mysql -u root -p$root_password"
+            else
+                mysql_cmd="mysql -u root"
+            fi
+
+            # Remove database and user
+            $mysql_cmd -e "DROP DATABASE IF EXISTS $db_name;" 2>/dev/null || log_warning "Could not drop database $db_name"
+            $mysql_cmd -e "DROP USER IF EXISTS '$db_user'@'localhost';" 2>/dev/null || log_warning "Could not drop user $db_user"
+            $mysql_cmd -e "FLUSH PRIVILEGES;" 2>/dev/null || true
+
+            log_info "✅ Database $db_name and user $db_user removed"
+        else
+            log_warning "⚠️  Could not connect to MySQL as root, skipping database removal"
+        fi
+    fi
+
+    # Step 5: Remove app directory
+    log_info "📁 Removing app directory..."
+    local app_dir="$APPS_BASE_DIR/$app_name"
+    if [ -d "$app_dir" ]; then
+        rm -rf "$app_dir"
+        log_info "✅ App directory removed: $app_dir"
+    else
+        log_warning "⚠️  App directory not found: $app_dir"
+    fi
+
+    # Step 6: Remove config file
+    log_info "⚙️  Removing config file..."
+    if [ -f "$config_file" ]; then
+        rm -f "$config_file"
+        log_info "✅ Config file removed: $config_file"
+    else
+        log_warning "⚠️  Config file not found: $config_file"
+    fi
+
+    # Step 7: Reload systemd daemon
+    systemctl daemon-reload
+
+    log_info "✅ App $app_name removed successfully!"
+    log_info "📋 Removal summary:"
+    log_info "   - Systemd service: removed"
+    log_info "   - App directory: removed"
+    log_info "   - Config file: removed"
+    if [ "$remove_database" = true ]; then
+        log_info "   - Database: removed"
+    else
+        log_info "   - Database: preserved"
+    fi
+}
+
+remove_app_force() {
+    local app_name="$1"
+
+    if [ -z "$app_name" ]; then
+        log_error "Usage: remove_app_force <app-name>"
+        return 1
+    fi
+
+    # Confirm force removal
+    log_warning "⚠️  FORCE REMOVAL: This will remove app $app_name even if configs are missing"
+    read -p "Are you sure? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        log_info "Force removal cancelled"
+        return 0
+    fi
+
+    log_info "🗑️  Starting force removal process for $app_name"
+
+    # Step 1: Stop and disable systemd service (force)
+    log_info "🛑 Force stopping systemd service..."
     systemctl stop "octane-$app_name.service" 2>/dev/null || true
     systemctl disable "octane-$app_name.service" 2>/dev/null || true
     rm -f "/etc/systemd/system/octane-$app_name.service"
 
-    # Remove app directory
-    rm -rf "$APPS_BASE_DIR/$app_name"
+    # Also try to kill any remaining processes
+    pkill -f "octane.*$app_name" 2>/dev/null || true
+    log_info "✅ Service force stopped"
 
-    # Remove config
-    rm -f "/etc/laravel-apps/$app_name.conf"
-
-    # Remove database (optional)
-    read -p "Remove database too? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        source "/etc/laravel-apps/$app_name.conf"
-        mysql -u root -e "DROP DATABASE IF EXISTS $DB_NAME; DROP USER IF EXISTS '$DB_USER'@'localhost';"
+    # Step 2: Remove app directory (force)
+    log_info "📁 Force removing app directory..."
+    local app_dir="$APPS_BASE_DIR/$app_name"
+    if [ -d "$app_dir" ]; then
+        rm -rf "$app_dir"
+        log_info "✅ App directory removed: $app_dir"
+    else
+        log_warning "⚠️  App directory not found: $app_dir"
     fi
 
+    # Step 3: Remove config file (force)
+    log_info "⚙️  Force removing config file..."
+    local config_file="/etc/laravel-apps/$app_name.conf"
+    if [ -f "$config_file" ]; then
+        rm -f "$config_file"
+        log_info "✅ Config file removed: $config_file"
+    else
+        log_warning "⚠️  Config file not found: $config_file"
+    fi
+
+    # Step 4: Try to remove database with common naming conventions
+    read -p "Attempt to remove database with common naming? (y/N): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        log_info "🗄️  Attempting database removal with common naming..."
+        load_module "database"
+
+        local root_password=$(get_mysql_root_password)
+        if [ $? -eq 0 ]; then
+            local mysql_cmd
+            if [ -n "$root_password" ]; then
+                mysql_cmd="mysql -u root -p$root_password"
+            else
+                mysql_cmd="mysql -u root"
+            fi
+
+            # Try common database naming patterns
+            local common_db_names=(
+                "${app_name}_db"
+                "${app_name}db"
+                "$app_name"
+            )
+
+            local common_user_names=(
+                "${app_name}_user"
+                "${app_name}user"
+                "$app_name"
+            )
+
+            for db_name in "${common_db_names[@]}"; do
+                $mysql_cmd -e "DROP DATABASE IF EXISTS $db_name;" 2>/dev/null && log_info "✅ Dropped database: $db_name"
+            done
+
+            for user_name in "${common_user_names[@]}"; do
+                $mysql_cmd -e "DROP USER IF EXISTS '$user_name'@'localhost';" 2>/dev/null && log_info "✅ Dropped user: $user_name"
+            done
+
+            $mysql_cmd -e "FLUSH PRIVILEGES;" 2>/dev/null || true
+            log_info "✅ Database cleanup completed"
+        else
+            log_warning "⚠️  Could not connect to MySQL as root, skipping database removal"
+        fi
+    fi
+
+    # Step 5: Clean up any remaining files
+    log_info "🧹 Cleaning up remaining files..."
+
+    # Remove log files
+    rm -f "/var/log/frankenphp/$app_name.log" 2>/dev/null || true
+    rm -f "/var/log/$app_name"* 2>/dev/null || true
+
+    # Remove any backup files
+    rm -f "/etc/laravel-apps/$app_name.conf.backup"* 2>/dev/null || true
+
+    # Reload systemd daemon
     systemctl daemon-reload
 
-    log_info "✅ App $app_name removed successfully!"
+    log_info "✅ Force removal of $app_name completed!"
+    log_info "📋 Force removal summary:"
+    log_info "   - Systemd service: force removed"
+    log_info "   - App directory: force removed"
+    log_info "   - Config file: force removed"
+    log_info "   - Database: attempted cleanup"
+    log_info "   - Log files: cleaned up"
 }
 
 list_apps() {
@@ -1081,3 +1271,234 @@ check_frankenphp_binary() {
 # =============================================
 # Enhanced Octane Detection & Configuration
 # =============================================
+
+# =============================================
+# Config File Management
+# =============================================
+
+fix_config_files() {
+    local app_name="$1"
+
+    if [ -z "$app_name" ]; then
+        log_error "Usage: fix_config_files <app-name>"
+        return 1
+    fi
+
+    local config_file="/etc/laravel-apps/$app_name.conf"
+
+    if [ ! -f "$config_file" ]; then
+        log_error "Config file not found: $config_file"
+        return 1
+    fi
+
+    log_info "🔧 Fixing configuration file for $app_name"
+
+    # Create backup
+    cp "$config_file" "$config_file.backup.$(date +%Y%m%d_%H%M%S)"
+
+    # Fix the CREATED_AT line by adding quotes
+    sed -i 's/^CREATED_AT=\(.*\)$/CREATED_AT="\1"/' "$config_file"
+
+    # Test if the config file can be sourced now
+    if bash -n "$config_file" 2>/dev/null; then
+        log_info "✅ Configuration file fixed successfully"
+
+        # Test sourcing
+        if source "$config_file" 2>/dev/null; then
+            log_info "✅ Configuration file can be sourced properly"
+        else
+            log_warning "⚠️  Configuration file syntax is valid but has sourcing issues"
+        fi
+    else
+        log_error "❌ Configuration file still has syntax errors"
+        return 1
+    fi
+}
+
+fix_all_config_files() {
+    log_info "🔧 Fixing all configuration files..."
+
+    local config_dir="/etc/laravel-apps"
+    local fixed_count=0
+    local error_count=0
+
+    if [ ! -d "$config_dir" ]; then
+        log_error "Config directory not found: $config_dir"
+        return 1
+    fi
+
+    for config_file in "$config_dir"/*.conf; do
+        if [ -f "$config_file" ]; then
+            local app_name=$(basename "$config_file" .conf)
+            log_info "🔧 Processing: $app_name"
+
+            if fix_config_files "$app_name"; then
+                fixed_count=$((fixed_count + 1))
+            else
+                error_count=$((error_count + 1))
+            fi
+        fi
+    done
+
+    log_info "✅ Fixed $fixed_count configuration files"
+    if [ $error_count -gt 0 ]; then
+        log_warning "⚠️  $error_count configuration files had errors"
+    fi
+}
+
+# =============================================
+# Common Issue Fixes
+# =============================================
+
+fix_common_issues() {
+    local app_name="$1"
+
+    if [ -z "$app_name" ]; then
+        log_error "Usage: fix_common_issues <app-name>"
+        return 1
+    fi
+
+    log_info "🔧 Running common fixes for $app_name"
+
+    # Fix 1: Config file syntax
+    log_info "🔧 Step 1: Fixing configuration file..."
+    if fix_config_files "$app_name"; then
+        log_info "✅ Configuration file fixed"
+    else
+        log_warning "⚠️  Configuration file issues persist"
+    fi
+
+    # Fix 2: Check app directory and permissions
+    log_info "🔧 Step 2: Checking app directory and permissions..."
+    local app_dir="/opt/laravel-apps/$app_name"
+    if [ -d "$app_dir" ]; then
+        log_info "✅ App directory exists: $app_dir"
+
+        # Fix permissions
+        chown -R www-data:www-data "$app_dir"
+        chmod -R 755 "$app_dir"
+        chmod -R 775 "$app_dir/storage"
+        chmod -R 775 "$app_dir/bootstrap/cache"
+
+        log_info "✅ Permissions fixed"
+    else
+        log_error "❌ App directory not found: $app_dir"
+        return 1
+    fi
+
+    # Fix 3: Database connection
+    log_info "🔧 Step 3: Fixing database connection..."
+    if fix_app_database "$app_name"; then
+        log_info "✅ Database connection fixed"
+    else
+        log_warning "⚠️  Database connection issues persist"
+    fi
+
+    # Fix 4: Laravel optimizations
+    log_info "🔧 Step 4: Running Laravel optimizations..."
+    cd "$app_dir"
+
+    # Clear caches
+    php artisan cache:clear 2>/dev/null || true
+    php artisan config:clear 2>/dev/null || true
+    php artisan route:clear 2>/dev/null || true
+    php artisan view:clear 2>/dev/null || true
+
+    # Optimize for production
+    php artisan config:cache 2>/dev/null || true
+    php artisan route:cache 2>/dev/null || true
+    php artisan view:cache 2>/dev/null || true
+
+    log_info "✅ Laravel optimizations completed"
+
+    # Fix 5: Systemd service
+    log_info "🔧 Step 5: Fixing systemd service..."
+    if systemd_fix_service "$app_name"; then
+        log_info "✅ Systemd service fixed"
+    else
+        log_warning "⚠️  Systemd service issues persist"
+    fi
+
+    log_info "✅ Common fixes completed for $app_name"
+}
+
+fix_app_issues() {
+    local app_name="$1"
+
+    if [ -z "$app_name" ]; then
+        log_error "Usage: fix_app_issues <app-name>"
+        return 1
+    fi
+
+    log_info "🔧 Running comprehensive app fixes for $app_name"
+
+    # Load required modules
+    load_module "database"
+    load_module "systemd"
+
+    # Run common fixes first
+    fix_common_issues "$app_name"
+
+    # Additional specific fixes
+    local app_dir="/opt/laravel-apps/$app_name"
+    cd "$app_dir"
+
+    # Fix 6: Octane configuration
+    log_info "🔧 Step 6: Checking Octane configuration..."
+    if ! php artisan list | grep -q "octane:start"; then
+        log_info "📦 Installing Laravel Octane..."
+        composer require laravel/octane
+    fi
+
+    # Configure FrankenPHP
+    if ! is_frankenphp_configured; then
+        log_info "🔧 Configuring FrankenPHP..."
+        php artisan octane:install --server=frankenphp
+    fi
+
+    # Fix 7: Environment variables
+    log_info "🔧 Step 7: Checking environment variables..."
+    if [ -f ".env" ]; then
+        # Ensure OCTANE_SERVER is set
+        if ! grep -q "OCTANE_SERVER=" .env; then
+            echo "OCTANE_SERVER=frankenphp" >> .env
+        else
+            sed -i 's/OCTANE_SERVER=.*/OCTANE_SERVER=frankenphp/' .env
+        fi
+
+        # Ensure APP_ENV is set correctly
+        if ! grep -q "APP_ENV=" .env; then
+            echo "APP_ENV=production" >> .env
+        fi
+
+        log_info "✅ Environment variables checked"
+    fi
+
+    # Fix 8: Run migrations
+    log_info "🔧 Step 8: Running database migrations..."
+    if php artisan migrate --force 2>/dev/null; then
+        log_info "✅ Database migrations completed"
+    else
+        log_warning "⚠️  Database migrations failed"
+    fi
+
+    log_info "✅ All app fixes completed for $app_name"
+}
+
+is_frankenphp_configured() {
+    # Check if FrankenPHP is properly configured in Laravel Octane
+    if [ -f "config/octane.php" ]; then
+        if grep -q "frankenphp" config/octane.php; then
+            return 0
+        fi
+    fi
+
+    # Check if .env has OCTANE_SERVER set to frankenphp
+    if [ -f ".env" ]; then
+        if grep -q "OCTANE_SERVER=frankenphp" .env; then
+            return 0
+        fi
+    fi
+
+    return 1
+}

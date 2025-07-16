@@ -91,6 +91,7 @@ show_help() {
     echo "  install <app> <domain> [repo] - Install Laravel app baru"
     echo "  deploy <app>                - Deploy ulang app"
     echo "  remove <app>                - Hapus app"
+    echo "  remove:force <app>          - Force hapus app (jika config rusak)"
     echo ""
     echo "🔧 Laravel Octane Commands:"
     echo "  octane:install [dir]        - Install Laravel Octane + FrankenPHP"
@@ -150,6 +151,14 @@ show_help() {
     echo "  connection:check <app>      - Check app connection issues"
     echo "  connection:fix <app>        - Fix connection issues"
     echo "  connection:test <app>       - Test connectivity"
+    echo ""
+    echo "⚙️  Config Commands:"
+    echo "  config:fix <app>            - Fix configuration file issues"
+    echo "  config:fix-all              - Fix all configuration files"
+    echo ""
+    echo "🔧 Fix Commands:"
+    echo "  fix:common <app>            - Fix common installation issues"
+    echo "  fix:app <app>               - Comprehensive app fixes"
     echo ""
     echo "Examples:"
     echo "  $0 setup                                    # Setup sistem"
@@ -267,6 +276,9 @@ main() {
             ;;
         "remove")
             remove_app "$@"
+            ;;
+        "remove:force")
+            remove_app_force "$@"
             ;;
 
         # Laravel Octane commands
@@ -464,6 +476,22 @@ main() {
                     connection_test "$1"
                     ;;
             esac
+            ;;
+
+        # Fix commands
+        "fix:common")
+            fix_common_issues "$@"
+            ;;
+        "fix:app")
+            fix_app_issues "$@"
+            ;;
+
+        # Config fix commands
+        "config:fix")
+            fix_config_files "$@"
+            ;;
+        "config:fix-all")
+            fix_all_config_files
             ;;
 
         # Quick commands
