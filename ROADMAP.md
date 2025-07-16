@@ -233,15 +233,18 @@ Tool ini dirancang untuk membantu developer/small team yang **tidak punya dedica
 ## 📚 **Resources & References**
 
 ### **Technical Documentation:**
-- [Laravel Octane Documentation](https://laravel.com/docs/octane)
-- [FrankenPHP Documentation](https://frankenphp.dev/)
-- [Laravel Horizon Documentation](https://laravel.com/docs/horizon)
-- [Redis Documentation](https://redis.io/documentation)
+- [Laravel Octane Documentation](https://laravel.com/docs/11.x/octane)
+- [FrankenPHP Official Site](https://frankenphp.dev/)
+- [Laravel Horizon Documentation](https://laravel.com/docs/11.x/horizon)
+- [Redis Official Documentation](https://redis.io/docs/)
+- [Laravel Deployment Guide](https://laravel.com/docs/11.x/deployment)
 
 ### **Performance Benchmarks:**
-- [Laravel Performance Best Practices](https://laravel.com/docs/optimization)
-- [PHP Performance Optimization](https://www.php.net/manual/en/features.performance.php)
-- [Octane Performance Benchmarks](https://github.com/laravel/octane/blob/1.x/BENCHMARKS.md)
+- [Laravel Octane GitHub](https://github.com/laravel/octane)
+- [FrankenPHP Official Site](https://frankenphp.dev/)
+- [Redis Documentation](https://redis.io/)
+- [Laravel Performance Guide](https://laravel.com/docs/11.x/deployment)
+- [PHP Official Documentation](https://www.php.net/manual/en/)
 
 ---
 
