@@ -33,28 +33,31 @@ octane_install() {
 
     log_info "🚀 Installing Laravel Octane with FrankenPHP..."
 
-    # Install Octane
-    if ! composer require laravel/octane; then
-        log_error "Failed to install Laravel Octane"
-        return 1
-    fi
+    # Step 1: Check if Octane is already installed
+    if php artisan list | grep -q "octane:start"; then
+        log_info "✅ Laravel Octane already installed"
 
-    # Install Octane with FrankenPHP
-    if ! php artisan octane:install --server=frankenphp; then
-        log_error "Failed to install Octane with FrankenPHP"
-        return 1
-    fi
+        # Step 2: Configure FrankenPHP (Laravel will handle binary download)
+        log_info "🔧 Configuring Octane to use FrankenPHP..."
+        if ! php artisan octane:install --server=frankenphp; then
+            log_error "Failed to configure Octane with FrankenPHP"
+            return 1
+        fi
+    else
+        log_info "📦 Installing Laravel Octane..."
 
-    # Download FrankenPHP binary if not exists
-    if [ ! -f "frankenphp" ]; then
-        log_info "📥 Downloading FrankenPHP binary..."
-        if ! curl -LO https://github.com/dunglas/frankenphp/releases/latest/download/frankenphp-linux-x86_64; then
-            log_error "Failed to download FrankenPHP binary"
+        # Step 1: Install Octane package
+        if ! composer require laravel/octane; then
+            log_error "Failed to install Laravel Octane"
             return 1
         fi
 
-        mv frankenphp-linux-x86_64 frankenphp
-        chmod +x frankenphp
+        # Step 2: Install and configure FrankenPHP (Laravel will handle binary download)
+        log_info "🔧 Installing and configuring FrankenPHP..."
+        if ! php artisan octane:install --server=frankenphp; then
+            log_error "Failed to install FrankenPHP via Laravel Octane"
+            return 1
+        fi
     fi
 
     log_info "✅ Laravel Octane with FrankenPHP installed successfully!"
@@ -217,12 +220,17 @@ octane_health_check() {
         log_info "✅ Octane installed"
     fi
 
-    # Check FrankenPHP binary
-    if [ ! -f "frankenphp" ]; then
-        log_warning "⚠️  FrankenPHP binary not found in current directory"
-        issues=$((issues + 1))
+    # Check FrankenPHP configuration
+    if [ -f "config/octane.php" ]; then
+        if grep -q "frankenphp" config/octane.php; then
+            log_info "✅ FrankenPHP configured in Octane"
+        else
+            log_warning "⚠️  FrankenPHP not configured in Octane"
+            issues=$((issues + 1))
+        fi
     else
-        log_info "✅ FrankenPHP binary found"
+        log_warning "⚠️  Octane config file not found"
+        issues=$((issues + 1))
     fi
 
     # Check environment file
@@ -337,6 +345,111 @@ is_octane_installed() {
     local target_dir="${1:-$(pwd)}"
     cd "$target_dir"
     php artisan list | grep -q "octane:start"
+}
+
+is_frankenphp_configured() {
+    local target_dir="${1:-$(pwd)}"
+    cd "$target_dir"
+
+    # Check if octane config exists and has frankenphp configured
+    if [ -f "config/octane.php" ]; then
+        grep -q "frankenphp" config/octane.php
+    else
+        return 1
+    fi
+}
+
+check_octane_server_config() {
+    local target_dir="${1:-$(pwd)}"
+    cd "$target_dir"
+
+    # Check .env file for OCTANE_SERVER
+    if [ -f ".env" ]; then
+        grep -q "OCTANE_SERVER=frankenphp" .env
+    else
+        return 1
+    fi
+}
+
+install_octane_if_needed() {
+    local target_dir="${1:-$(pwd)}"
+    cd "$target_dir"
+
+    if ! is_octane_installed; then
+        log_info "📦 Installing Laravel Octane..."
+        if ! composer require laravel/octane; then
+            log_error "Failed to install Laravel Octane"
+            return 1
+        fi
+        log_info "✅ Laravel Octane installed successfully"
+    else
+        log_info "✅ Laravel Octane already installed"
+    fi
+
+    return 0
+}
+
+configure_frankenphp_if_needed() {
+    local target_dir="${1:-$(pwd)}"
+    cd "$target_dir"
+
+    if ! is_frankenphp_configured; then
+        log_info "🔧 Configuring FrankenPHP for Octane..."
+        if ! php artisan octane:install --server=frankenphp; then
+            log_error "Failed to configure FrankenPHP"
+            return 1
+        fi
+        log_info "✅ FrankenPHP configured successfully"
+    else
+        log_info "✅ FrankenPHP already configured"
+    fi
+
+    return 0
+}
+
+# Enhanced installation function using best practices
+octane_install_best_practice() {
+    local target_dir="${1:-$(pwd)}"
+
+    if [ ! -d "$target_dir" ]; then
+        log_error "Directory not found: $target_dir"
+        return 1
+    fi
+
+    cd "$target_dir"
+
+    # Check if it's a Laravel project
+    if [ ! -f "artisan" ]; then
+        log_error "Not a Laravel project (artisan not found)"
+        return 1
+    fi
+
+    log_info "🚀 Setting up Laravel Octane with FrankenPHP (Best Practice)..."
+
+    # Step 1: Install Octane if needed
+    if ! install_octane_if_needed "$target_dir"; then
+        return 1
+    fi
+
+    # Step 2: Configure FrankenPHP if needed
+    if ! configure_frankenphp_if_needed "$target_dir"; then
+        return 1
+    fi
+
+    # Step 3: Update .env file if needed
+    if ! check_octane_server_config; then
+        log_info "🔧 Updating .env file for FrankenPHP..."
+        if ! grep -q "OCTANE_SERVER=" .env; then
+            echo "OCTANE_SERVER=frankenphp" >> .env
+        else
+            sed -i.bak 's/OCTANE_SERVER=.*/OCTANE_SERVER=frankenphp/' .env
+        fi
+        log_info "✅ .env file updated"
+    fi
+
+    log_info "✅ Laravel Octane with FrankenPHP setup completed!"
+    log_info "🔧 To start server: php artisan octane:start"
+    log_info "🔧 Or use: octane_start"
 }
 
 is_octane_running() {

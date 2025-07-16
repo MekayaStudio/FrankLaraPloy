@@ -224,13 +224,7 @@ install_octane_enhanced() {
             return 1
         fi
 
-        log_info "� Downloading FrankenPHP binary..."
-        if ! download_frankenphp_binary; then
-            log_error "Failed to download FrankenPHP binary"
-            return 1
-        fi
-
-        log_info "�🔧 Configuring Octane with FrankenPHP..."
+        log_info "🔧 Configuring Octane with FrankenPHP..."
         if ! php artisan octane:install --server=frankenphp; then
             log_error "Failed to configure Octane with FrankenPHP"
             return 1
@@ -567,16 +561,19 @@ check_frankenphp_configured() {
 }
 
 configure_frankenphp() {
-    # Configure existing Octane installation to use FrankenPHP
-    log_info "🔧 Configuring existing Octane to use FrankenPHP..."
+    # Configure Laravel Octane to use FrankenPHP following best practices
+    log_info "🔧 Configuring Laravel Octane to use FrankenPHP..."
 
-    # Step 1: Download FrankenPHP binary if not exists
-    if ! download_frankenphp_binary; then
-        log_error "Failed to download FrankenPHP binary"
-        return 1
+    # Check if Octane is installed first
+    if ! php artisan list | grep -q "octane:start"; then
+        log_info "📦 Installing Laravel Octane first..."
+        if ! composer require laravel/octane; then
+            log_error "Failed to install Laravel Octane"
+            return 1
+        fi
     fi
 
-    # Step 2: Run octane:install with FrankenPHP
+    # Configure FrankenPHP (Laravel will handle binary download)
     if php artisan octane:install --server=frankenphp; then
         log_info "✅ FrankenPHP configured successfully"
         return 0
@@ -714,20 +711,19 @@ show_octane_status() {
         log_info "❌ Environment file: NO"
     fi
 
-    # Check FrankenPHP binary
+    # Check FrankenPHP configuration
     if check_frankenphp_binary; then
-        log_info "✅ FrankenPHP binary: YES"
+        log_info "✅ FrankenPHP configuration: YES"
 
-        # Get FrankenPHP version
-        local frankenphp_version=$(./frankenphp version 2>/dev/null | head -n1 || echo "unknown")
-        log_info "   Version: $frankenphp_version"
-    else
-        log_info "❌ FrankenPHP binary: NO"
-        if [ -f "frankenphp" ]; then
-            log_info "   (Binary exists but not executable or corrupted)"
+        # Check if Laravel Octane can detect FrankenPHP
+        if timeout 5 php artisan octane:status --server=frankenphp &>/dev/null; then
+            log_info "   Laravel Octane can detect FrankenPHP"
         else
-            log_info "   (Binary file not found)"
+            log_info "   Laravel Octane status check available"
         fi
+    else
+        log_info "❌ FrankenPHP configuration: NO"
+        log_info "   (FrankenPHP not configured in Laravel Octane)"
     fi
 
     # Check service status
@@ -772,10 +768,13 @@ handle_octane_scenario() {
     case "$scenario" in
         "FULLY_CONFIGURED")
             log_info "✅ Octane with FrankenPHP already configured"
-            # Still check if binary exists
+            # Still check if binary exists via Laravel Octane
             if ! check_frankenphp_binary; then
-                log_info "📥 FrankenPHP binary missing, downloading..."
-                download_frankenphp_binary
+                log_info "📥 FrankenPHP binary missing, installing via Laravel Octane..."
+                if ! php artisan octane:install --server=frankenphp; then
+                    log_error "Failed to install FrankenPHP via Laravel Octane"
+                    return 1
+                fi
             fi
             return 0
             ;;
@@ -798,19 +797,13 @@ handle_octane_scenario() {
         "NO_OCTANE")
             log_info "📦 No Octane found, installing fresh..."
 
-            # Download FrankenPHP binary first
-            if ! download_frankenphp_binary; then
-                log_error "Failed to download FrankenPHP binary"
-                return 1
-            fi
-
             # Install Octane
             if ! composer require laravel/octane; then
                 log_error "Failed to install Laravel Octane"
                 return 1
             fi
 
-            # Configure with FrankenPHP
+            # Configure with FrankenPHP (this will download the binary automatically)
             if ! php artisan octane:install --server=frankenphp; then
                 log_error "Failed to configure Octane with FrankenPHP"
                 return 1
@@ -1060,12 +1053,26 @@ download_frankenphp_binary() {
 }
 
 check_frankenphp_binary() {
-    local frankenphp_binary="frankenphp"
+    # Check if FrankenPHP is properly configured in Laravel Octane
+    # This follows Laravel best practices instead of manual binary checking
 
-    if [ -f "$frankenphp_binary" ] && [ -x "$frankenphp_binary" ]; then
-        if ./"$frankenphp_binary" version &>/dev/null; then
+    # Check if octane config exists and has frankenphp configured
+    if [ -f "config/octane.php" ]; then
+        if grep -q "frankenphp" config/octane.php; then
             return 0
         fi
+    fi
+
+    # Check if .env has OCTANE_SERVER set to frankenphp
+    if [ -f ".env" ]; then
+        if grep -q "OCTANE_SERVER=frankenphp" .env; then
+            return 0
+        fi
+    fi
+
+    # Check if Laravel Octane can find FrankenPHP
+    if timeout 5 php artisan octane:status --server=frankenphp &>/dev/null; then
+        return 0
     fi
 
     return 1

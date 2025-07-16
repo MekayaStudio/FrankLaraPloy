@@ -94,6 +94,7 @@ show_help() {
     echo ""
     echo "🔧 Laravel Octane Commands:"
     echo "  octane:install [dir]        - Install Laravel Octane + FrankenPHP"
+    echo "  octane:install:best [dir]   - Install Laravel Octane dengan best practices"
     echo "  octane:start [dir]          - Start Octane server"
     echo "  octane:stop [dir]           - Stop Octane server"
     echo "  octane:restart [dir]        - Restart Octane server"
@@ -271,6 +272,20 @@ main() {
         # Laravel Octane commands
         "octane:install")
             octane_install "$@"
+            ;;
+        "octane:install:best")
+            # Use best practice installation
+            if [ -n "$1" ]; then
+                local app_dir="$APPS_BASE_DIR/$1"
+                if [ -d "$app_dir" ]; then
+                    cd "$app_dir"
+                    octane_install_best_practice "$app_dir"
+                else
+                    log_error "App directory not found: $app_dir"
+                fi
+            else
+                octane_install_best_practice "$(pwd)"
+            fi
             ;;
         "octane:start")
             octane_start "$@"
