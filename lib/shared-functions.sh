@@ -540,7 +540,32 @@ test_mysql_connection() {
             return 1
         fi
     else
-        log_debug "MySQL command not found, skipping connection test"
+        log_error "MySQL command not found"
+        return 1
+    fi
+}
+
+# Test Redis connection
+test_redis_connection() {
+    # Test connection (mock in test environment)
+    if [ "${TEST_MODE:-false}" = "true" ]; then
+        # Mock successful connection in test mode
+        log_debug "Redis connection successful (mocked)"
+        return 0
+    fi
+
+    # Real Redis connection test
+    if command -v redis-cli >/dev/null 2>&1; then
+        redis-cli ping >/dev/null 2>&1
+        if [ $? -eq 0 ]; then
+            log_debug "Redis connection successful"
+            return 0
+        else
+            log_error "Redis connection failed"
+            return 1
+        fi
+    else
+        log_error "Redis CLI command not found"
         return 1
     fi
 }

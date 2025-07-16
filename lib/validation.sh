@@ -457,7 +457,7 @@ validate_system_requirements() {
     fi
 
     # Check required commands
-    local required_commands=("curl" "wget" "git" "mysql" "php" "composer" "node" "npm")
+    local required_commands=("curl" "wget" "git" "mysql" "php" "composer" "node" "npm" "redis-cli")
     for cmd in "${required_commands[@]}"; do
         if ! command_exists "$cmd"; then
             add_validation_result "${field_name}_cmd_$cmd" "error" "Required command not found: $cmd"
@@ -474,8 +474,8 @@ validate_system_requirements() {
             local php_major=$(echo "$php_version" | cut -d. -f1)
             local php_minor=$(echo "$php_version" | cut -d. -f2)
 
-            if [ $php_major -lt 8 ] || ([ $php_major -eq 8 ] && [ $php_minor -lt 1 ]); then
-                add_validation_result "${field_name}_php_version" "error" "PHP 8.1+ required, found $php_version"
+            if [ $php_major -lt 8 ] || ([ $php_major -eq 8 ] && [ $php_minor -lt 3 ]); then
+                add_validation_result "${field_name}_php_version" "error" "PHP 8.3+ required, found $php_version"
                 ((errors++))
             else
                 add_validation_result "${field_name}_php_version" "success" "PHP version is compatible: $php_version"
@@ -524,6 +524,26 @@ validate_database_connection() {
     fi
 
     add_validation_result "$field_name" "success" "Database connection is working"
+    return 0
+}
+
+# Validate Redis connection
+validate_redis_connection() {
+    local field_name="${1:-redis_connection}"
+
+    # Check if Redis service is running
+    if ! systemctl is-active --quiet redis-server; then
+        add_validation_result "$field_name" "error" "Redis service is not running"
+        return 1
+    fi
+
+    # Test Redis connection
+    if ! test_redis_connection; then
+        add_validation_result "$field_name" "error" "Cannot connect to Redis"
+        return 1
+    fi
+
+    add_validation_result "$field_name" "success" "Redis connection is working"
     return 0
 }
 
@@ -660,6 +680,9 @@ validate_new_app_params() {
 
     # Validate database connection
     validate_database_connection "database"
+
+    # Validate Redis connection
+    validate_redis_connection "redis"
 
     # Validate resource availability
     validate_resource_availability "resources" "$app_name"
