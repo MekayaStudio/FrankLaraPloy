@@ -88,6 +88,7 @@ COMMANDS:
     resources                      Show multi-app resource usage
     status <app>                   Show app status
     logs <app> [lines]             Show app logs
+    debug [app]                    Debug system or specific app
     
     Service Management:
     systemd:check <app>            Check systemd service
@@ -184,6 +185,11 @@ main() {
         "logs")
             shift
             logs_app "$@"
+            ;;
+            
+        "debug")
+            shift
+            debug_system "$@"
             ;;
             
         # Database commands

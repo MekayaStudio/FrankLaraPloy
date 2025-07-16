@@ -118,14 +118,11 @@ update_system() {
 install_php() {
     log_info "🐘 Installing PHP ${PHP_VERSION}..."
     
-    # Add PHP repository
-    if ! add-apt-repository -y ppa:ondrej/php; then
-        handle_error "Failed to add PHP repository" $ERROR_NETWORK
-        return 1
-    fi
+    # Skip adding PPA repository, use default Ubuntu repository
+    log_info "Using default Ubuntu PHP repository..."
     
     if ! apt-get update -qq; then
-        handle_error "Failed to update package list after adding PHP repo" $ERROR_NETWORK
+        handle_error "Failed to update package list" $ERROR_NETWORK
         return 1
     fi
     
@@ -147,6 +144,7 @@ install_php() {
         "php${PHP_VERSION}-imagick"
         "php${PHP_VERSION}-opcache"
         "php${PHP_VERSION}-pdo"
+        "php${PHP_VERSION}-sqlite3"
         "php${PHP_VERSION}-tokenizer"
         "php${PHP_VERSION}-fileinfo"
         "php${PHP_VERSION}-posix"

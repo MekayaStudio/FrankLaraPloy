@@ -1119,16 +1119,24 @@ status_app() {
 
     log_info "📊 Status for app: $app_name"
 
-    # Check if service exists
-    if systemctl list-units --full -all | grep -q "octane-$app_name.service"; then
+    # Check if service file exists
+    if [ -f "/etc/systemd/system/octane-$app_name.service" ]; then
         # Get service status without failing the script
         local service_status
-        service_status=$(systemctl is-active "octane-$app_name.service" 2>/dev/null)
+        service_status=$(systemctl is-active "octane-$app_name.service" 2>/dev/null || echo "unknown")
         
         echo "🔍 Service Status: $service_status"
         
         # Show detailed status
         systemctl status "octane-$app_name.service" --no-pager || true
+        
+        # Additional info
+        local app_config="/etc/laravel-apps/$app_name.conf"
+        if [ -f "$app_config" ]; then
+            echo ""
+            echo "📋 App Configuration:"
+            cat "$app_config"
+        fi
         
         # If service is failing, show recent logs
         if [ "$service_status" = "failed" ] || [ "$service_status" = "activating" ]; then
@@ -1142,7 +1150,7 @@ status_app() {
         
         return 0
     else
-        log_error "Service not found: octane-$app_name.service"
+        log_error "Service file not found: /etc/systemd/system/octane-$app_name.service"
         return 1
     fi
 }
@@ -1584,9 +1592,16 @@ EOF
 
 count_running_apps() {
     local count=0
-    for service in $(systemctl list-units --type=service --state=running | grep "octane-" | awk '{print $1}'); do
-        count=$((count + 1))
+    # Redirect stderr to /dev/null to avoid counting error messages
+    local running_services=$(systemctl list-units --type=service --state=running 2>/dev/null | grep "octane-" | awk '{print $1}')
+    
+    for service in $running_services; do
+        # Only count services that actually end with .service
+        if [[ "$service" == octane-*.service ]]; then
+            count=$((count + 1))
+        fi
     done
+    
     echo $count
 }
 

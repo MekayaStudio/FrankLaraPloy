@@ -83,7 +83,11 @@ mysql_status() {
     local root_password=$(get_mysql_root_password)
     if [ -n "$root_password" ]; then
         local db_count=$(mysql -u root -p"$root_password" -e "SHOW DATABASES;" 2>/dev/null | wc -l)
-        log_info "📊 Database Count: $((db_count - 1))"
+        if [[ "$db_count" =~ ^[0-9]+$ ]] && [ "$db_count" -gt 0 ]; then
+            log_info "📊 Database Count: $((db_count - 1))"
+        else
+            log_info "📊 Database Count: 0"
+        fi
     fi
 }
 

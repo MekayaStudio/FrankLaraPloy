@@ -184,7 +184,7 @@ test_components() {
 # =============================================
 
 debug_system() {
-    local app_name="$1"
+    local app_name="${1:-}"
 
     if [ -n "$app_name" ]; then
         debug_app "$app_name"
