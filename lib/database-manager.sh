@@ -11,6 +11,29 @@ if [ -n "$DATABASE_MANAGER_LOADED" ]; then
 fi
 export DATABASE_MANAGER_LOADED=1
 
+# Load dependencies
+if [ -z "$SHARED_FUNCTIONS_LOADED" ]; then
+    source "$SCRIPT_DIR/lib/shared-functions.sh"
+fi
+if [ -z "$ERROR_HANDLER_LOADED" ]; then
+    source "$SCRIPT_DIR/lib/error-handler.sh"
+fi
+
+# =============================================
+# MySQL Configuration
+# =============================================
+
+MYSQL_ROOT_PASSWORD_FILE="/root/.laravel-apps/mysql_root_password"
+
+get_mysql_root_password() {
+    if [ -f "$MYSQL_ROOT_PASSWORD_FILE" ]; then
+        cat "$MYSQL_ROOT_PASSWORD_FILE"
+    else
+        handle_error "MySQL root password file not found" $ERROR_CONFIGURATION
+        return 1
+    fi
+}
+
 # =============================================
 # MySQL Service Functions
 # =============================================
@@ -49,246 +72,201 @@ mysql_status() {
     else
         log_warning "⚠️  Port 3306 is not listening"
     fi
-}
 
-get_mysql_root_password() {
-    local password=""
-
-    # Try to get password from debian-sys-maint
-    if [ -f "/etc/mysql/debian.cnf" ]; then
-        password=$(grep password /etc/mysql/debian.cnf | head -1 | cut -d'=' -f2 | xargs)
+    # Show MySQL version
+    local mysql_version=$(mysql --version 2>/dev/null | awk '{print $3}')
+    if [ -n "$mysql_version" ]; then
+        log_info "📋 MySQL Version: $mysql_version"
     fi
 
-    # If still empty, try common locations
-    if [ -z "$password" ]; then
-        if [ -f "/root/.mysql_root_password" ]; then
-            password=$(cat /root/.mysql_root_password)
-        fi
+    # Show database count
+    local root_password=$(get_mysql_root_password)
+    if [ -n "$root_password" ]; then
+        local db_count=$(mysql -u root -p"$root_password" -e "SHOW DATABASES;" 2>/dev/null | wc -l)
+        log_info "📊 Database Count: $((db_count - 1))"
     fi
-
-    # Test connection
-    if [ -n "$password" ]; then
-        if mysql -u root -p"$password" -e "SELECT 1;" &>/dev/null; then
-            log_info "✅ MySQL root connection successful"
-            echo "$password"
-            return 0
-        fi
-    fi
-
-    # If all fails, try without password
-    if mysql -u root -e "SELECT 1;" &>/dev/null; then
-        log_info "✅ MySQL root connection successful (no password)"
-        echo ""
-        return 0
-    fi
-
-    log_error "❌ MySQL root connection failed"
-    return 1
 }
 
 # =============================================
 # Database Management Functions
 # =============================================
 
-check_app_database() {
+setup_app_database() {
     local app_name="$1"
-
-    if [ -z "$app_name" ]; then
-        log_error "Usage: check_app_database <app-name>"
-        return 1
-    fi
-
-    log_info "🔍 Checking database for app: $app_name"
-
-    # Load app config
-    local app_config="$CONFIG_DIR/$app_name.conf"
-    if [ ! -f "$app_config" ]; then
-        log_error "App config not found: $app_config"
-        return 1
-    fi
-
-    source "$app_config"
-
+    
+    log_info "🗃️  Setting up database for app: $app_name"
+    
     # Get MySQL root password
     local root_password=$(get_mysql_root_password)
-    if [ $? -ne 0 ]; then
+    if [ -z "$root_password" ]; then
         return 1
     fi
-
-    # Check if database exists
-    if [ -n "$root_password" ]; then
-        mysql_cmd="mysql -u root -p$root_password"
+    
+    # Generate random password for app database user
+    local db_password=$(openssl rand -base64 32)
+    
+    # Create database and user
+    mysql -u root -p"$root_password" << EOF
+CREATE DATABASE IF NOT EXISTS \`$app_name\`;
+CREATE USER IF NOT EXISTS \`$app_name\`@'localhost' IDENTIFIED BY '$db_password';
+GRANT ALL PRIVILEGES ON \`$app_name\`.* TO \`$app_name\`@'localhost';
+FLUSH PRIVILEGES;
+EOF
+    
+    if [ $? -eq 0 ]; then
+        # Save database password
+        local db_password_file="/root/.laravel-apps/${app_name}_db_password"
+        echo "$db_password" > "$db_password_file"
+        chmod 600 "$db_password_file"
+        
+        log_info "✅ Database setup completed for app: $app_name"
+        echo "$db_password"
     else
-        mysql_cmd="mysql -u root"
+        handle_error "Failed to setup database for app: $app_name" $ERROR_DATABASE
+        return 1
     fi
+}
 
-    if $mysql_cmd -e "USE $DB_NAME;" 2>/dev/null; then
-        log_info "✅ Database $DB_NAME exists"
-
-        # Check if user can access database
-        if $mysql_cmd -e "SELECT 1 FROM information_schema.tables WHERE table_schema='$DB_NAME' LIMIT 1;" 2>/dev/null; then
-            log_info "✅ Database access works"
-
-            # Test connection from Laravel app
-            local app_dir="$APPS_BASE_DIR/$app_name"
-            cd "$app_dir"
-            if timeout 10 php artisan tinker --execute="DB::connection()->getPdo(); echo 'DB OK';" 2>/dev/null | grep -q "DB OK"; then
-                log_info "✅ Laravel database connection works"
-            else
-                log_warning "⚠️  Laravel database connection failed"
-            fi
-        else
-            log_error "❌ Database access failed"
-        fi
+check_app_database() {
+    local app_name="$1"
+    
+    log_info "🔍 Checking database connection for app: $app_name"
+    
+    local db_password_file="/root/.laravel-apps/${app_name}_db_password"
+    if [ ! -f "$db_password_file" ]; then
+        log_error "Database password file not found for app: $app_name"
+        return 1
+    fi
+    
+    local db_password=$(cat "$db_password_file")
+    
+    # Test database connection
+    if mysql -u "$app_name" -p"$db_password" -e "USE \`$app_name\`; SELECT 1;" &>/dev/null; then
+        log_info "✅ Database connection successful for app: $app_name"
+        return 0
     else
-        log_error "❌ Database $DB_NAME does not exist"
+        log_error "❌ Database connection failed for app: $app_name"
+        return 1
     fi
 }
 
 fix_app_database() {
     local app_name="$1"
-
-    if [ -z "$app_name" ]; then
-        log_error "Usage: fix_app_database <app-name>"
-        return 1
-    fi
-
+    
     log_info "🔧 Fixing database for app: $app_name"
+    
+    # Remove existing database and user
+    remove_app_database "$app_name"
+    
+    # Recreate database and user
+    setup_app_database "$app_name"
+    
+    log_info "✅ Database fixed for app: $app_name"
+}
 
-    # Load app config
-    local app_config="$CONFIG_DIR/$app_name.conf"
-    source "$app_config"
-
+remove_app_database() {
+    local app_name="$1"
+    
+    log_info "🗑️  Removing database for app: $app_name"
+    
     # Get MySQL root password
     local root_password=$(get_mysql_root_password)
-    if [ $? -ne 0 ]; then
+    if [ -z "$root_password" ]; then
         return 1
     fi
-
-    if [ -n "$root_password" ]; then
-        mysql_cmd="mysql -u root -p$root_password"
+    
+    # Remove database and user
+    mysql -u root -p"$root_password" << EOF
+DROP DATABASE IF EXISTS \`$app_name\`;
+DROP USER IF EXISTS \`$app_name\`@'localhost';
+FLUSH PRIVILEGES;
+EOF
+    
+    if [ $? -eq 0 ]; then
+        # Remove password file
+        rm -f "/root/.laravel-apps/${app_name}_db_password"
+        
+        log_info "✅ Database removed for app: $app_name"
     else
-        mysql_cmd="mysql -u root"
-    fi
-
-    # Create database if not exists
-    log_info "📦 Creating database if not exists..."
-    $mysql_cmd -e "CREATE DATABASE IF NOT EXISTS $DB_NAME CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-
-    # Create user if not exists
-    log_info "👤 Creating database user..."
-    $mysql_cmd -e "CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASSWORD';"
-
-    # Grant privileges
-    log_info "🔑 Granting privileges..."
-    $mysql_cmd -e "GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';"
-    $mysql_cmd -e "FLUSH PRIVILEGES;"
-
-    # Test connection
-    log_info "🧪 Testing database connection..."
-    if mysql -u "$DB_USER" -p"$DB_PASSWORD" -e "USE $DB_NAME; SELECT 1;" 2>/dev/null; then
-        log_info "✅ Database connection test successful"
-
-        # Run Laravel migrations
-        local app_dir="$APPS_BASE_DIR/$app_name"
-        cd "$app_dir"
-
-        log_info "🚀 Running Laravel migrations..."
-        if php artisan migrate --force; then
-            log_info "✅ Migrations completed successfully"
-        else
-            log_warning "⚠️  Migration failed, but database is accessible"
-        fi
-    else
-        log_error "❌ Database connection test failed"
+        handle_error "Failed to remove database for app: $app_name" $ERROR_DATABASE
         return 1
     fi
 }
 
 reset_app_database() {
     local app_name="$1"
-
-    if [ -z "$app_name" ]; then
-        log_error "Usage: reset_app_database <app-name>"
-        return 1
-    fi
-
-    log_warning "⚠️  This will DELETE ALL DATA in the database!"
-    read -p "Are you sure you want to reset database for $app_name? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        log_info "Database reset cancelled"
-        return 0
-    fi
-
+    
     log_info "🔄 Resetting database for app: $app_name"
-
-    # Load app config
-    local app_config="$CONFIG_DIR/$app_name.conf"
-    source "$app_config"
-
-    # Get MySQL root password
-    local root_password=$(get_mysql_root_password)
-    if [ $? -ne 0 ]; then
+    
+    local db_password_file="/root/.laravel-apps/${app_name}_db_password"
+    if [ ! -f "$db_password_file" ]; then
+        log_error "Database password file not found for app: $app_name"
         return 1
     fi
-
-    if [ -n "$root_password" ]; then
-        mysql_cmd="mysql -u root -p$root_password"
+    
+    local db_password=$(cat "$db_password_file")
+    
+    # Drop all tables
+    mysql -u "$app_name" -p"$db_password" -e "
+        SET FOREIGN_KEY_CHECKS = 0;
+        SELECT CONCAT('DROP TABLE IF EXISTS \`', table_name, '\`;') 
+        FROM information_schema.tables 
+        WHERE table_schema = '$app_name';" | grep "DROP TABLE" | mysql -u "$app_name" -p"$db_password" "$app_name"
+    
+    if [ $? -eq 0 ]; then
+        log_info "✅ Database reset completed for app: $app_name"
+        
+        # Run migrations if artisan exists
+        local app_dir="$APPS_BASE_DIR/$app_name"
+        if [ -f "$app_dir/artisan" ]; then
+            log_info "🔄 Running fresh migrations..."
+            cd "$app_dir"
+            php artisan migrate --force
+        fi
     else
-        mysql_cmd="mysql -u root"
-    fi
-
-    # Drop and recreate database
-    log_info "🗑️  Dropping database..."
-    $mysql_cmd -e "DROP DATABASE IF EXISTS $DB_NAME;"
-
-    log_info "📦 Creating fresh database..."
-    $mysql_cmd -e "CREATE DATABASE $DB_NAME CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-
-    # Ensure user has access
-    $mysql_cmd -e "GRANT ALL PRIVILEGES ON $DB_NAME.* TO '$DB_USER'@'localhost';"
-    $mysql_cmd -e "FLUSH PRIVILEGES;"
-
-    # Run fresh migrations
-    local app_dir="$APPS_BASE_DIR/$app_name"
-    cd "$app_dir"
-
-    log_info "🚀 Running fresh migrations..."
-    if php artisan migrate:fresh --force; then
-        log_info "✅ Database reset completed successfully"
-    else
-        log_error "❌ Migration failed"
+        handle_error "Failed to reset database for app: $app_name" $ERROR_DATABASE
         return 1
     fi
 }
 
 list_apps_database() {
-    log_info "📋 Database status for all apps:"
+    log_info "📋 Laravel applications database status:"
+    
+    local root_password=$(get_mysql_root_password)
+    if [ -z "$root_password" ]; then
+        return 1
+    fi
+    
     echo ""
-    printf "%-20s %-20s %-15s %-10s\n" "App" "Database" "User" "Status"
-    echo "================================================================"
-
-    local apps_dir="$APPS_BASE_DIR"
-
-    for app_dir in "$apps_dir"/*; do
+    printf "%-20s %-15s %-10s %-s\n" "APP NAME" "DATABASE" "USER" "STATUS"
+    printf "%-20s %-15s %-10s %-s\n" "--------" "--------" "----" "------"
+    
+    if [ ! -d "$APPS_BASE_DIR" ]; then
+        echo "No applications found"
+        return 0
+    fi
+    
+    for app_dir in "$APPS_BASE_DIR"/*; do
         if [ -d "$app_dir" ]; then
             local app_name=$(basename "$app_dir")
-            local config_file="$CONFIG_DIR/$app_name.conf"
-
-            if [ -f "$config_file" ]; then
-                source "$config_file"
-
-                # Test database connection
-                local status="❌ Failed"
-                if mysql -u "$DB_USER" -p"$DB_PASSWORD" -e "USE $DB_NAME; SELECT 1;" 2>/dev/null; then
-                    status="✅ OK"
+            local status="ERROR"
+            
+            # Check if database exists
+            if mysql -u root -p"$root_password" -e "USE \`$app_name\`;" &>/dev/null; then
+                # Check if user can connect
+                if check_app_database "$app_name" &>/dev/null; then
+                    status="OK"
+                else
+                    status="USER_ERROR"
                 fi
-
-                printf "%-20s %-20s %-15s %-10s\n" "$app_name" "$DB_NAME" "$DB_USER" "$status"
+            else
+                status="NO_DATABASE"
             fi
+            
+            printf "%-20s %-15s %-10s %-s\n" "$app_name" "$app_name" "$app_name" "$status"
         fi
     done
+    echo ""
 }
 
 # =============================================
@@ -297,34 +275,33 @@ list_apps_database() {
 
 backup_app_database() {
     local app_name="$1"
-    local backup_file="$2"
-
-    if [ -z "$app_name" ]; then
-        log_error "Usage: backup_app_database <app-name> [backup-file]"
+    local backup_file="${2:-}"
+    
+    log_info "💾 Backing up database for app: $app_name"
+    
+    local db_password_file="/root/.laravel-apps/${app_name}_db_password"
+    if [ ! -f "$db_password_file" ]; then
+        handle_error "Database password file not found for app: $app_name" $ERROR_CONFIGURATION
         return 1
     fi
-
-    # Load app config
-    local app_config="$CONFIG_DIR/$app_name.conf"
-    source "$app_config"
-
-    # Set backup file if not provided
+    
+    local db_password=$(cat "$db_password_file")
+    
+    # Set backup file path
     if [ -z "$backup_file" ]; then
-        backup_file="$BACKUP_DIR/db_${app_name}_$(date +%Y%m%d_%H%M%S).sql"
+        local timestamp=$(date +"%Y%m%d_%H%M%S")
+        backup_file="$BACKUP_DIR/database_${app_name}_${timestamp}.sql"
     fi
-
+    
     # Create backup directory
-    mkdir -p "$(dirname "$backup_file")"
-
-    log_info "💾 Backing up database $DB_NAME to $backup_file"
-
-    # Create backup
-    if mysqldump -u "$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" > "$backup_file"; then
-        log_info "✅ Database backup completed"
-        log_info "📁 Backup saved to: $backup_file"
-        return 0
+    ensure_directory "$(dirname "$backup_file")"
+    
+    # Create database dump
+    if mysqldump -u "$app_name" -p"$db_password" "$app_name" > "$backup_file"; then
+        log_info "✅ Database backup created: $backup_file"
+        echo "$backup_file"
     else
-        log_error "❌ Database backup failed"
+        handle_error "Failed to create database backup for app: $app_name" $ERROR_DATABASE
         return 1
     fi
 }
@@ -332,63 +309,74 @@ backup_app_database() {
 restore_app_database() {
     local app_name="$1"
     local backup_file="$2"
-
-    if [ -z "$app_name" ] || [ -z "$backup_file" ]; then
-        log_error "Usage: restore_app_database <app-name> <backup-file>"
+    
+    if [ -z "$backup_file" ] || [ ! -f "$backup_file" ]; then
+        handle_error "Backup file not found: $backup_file" $ERROR_FILESYSTEM
         return 1
     fi
-
-    if [ ! -f "$backup_file" ]; then
-        log_error "Backup file not found: $backup_file"
+    
+    log_info "🔄 Restoring database for app: $app_name from: $backup_file"
+    
+    local db_password_file="/root/.laravel-apps/${app_name}_db_password"
+    if [ ! -f "$db_password_file" ]; then
+        handle_error "Database password file not found for app: $app_name" $ERROR_CONFIGURATION
         return 1
     fi
-
-    log_warning "⚠️  This will overwrite the current database!"
-    read -p "Are you sure you want to restore database for $app_name? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        log_info "Database restore cancelled"
-        return 0
-    fi
-
-    # Load app config
-    local app_config="$CONFIG_DIR/$app_name.conf"
-    source "$app_config"
-
-    log_info "🔄 Restoring database $DB_NAME from $backup_file"
-
+    
+    local db_password=$(cat "$db_password_file")
+    
     # Restore database
-    if mysql -u "$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" < "$backup_file"; then
-        log_info "✅ Database restore completed"
-        return 0
+    if mysql -u "$app_name" -p"$db_password" "$app_name" < "$backup_file"; then
+        log_info "✅ Database restored successfully for app: $app_name"
     else
-        log_error "❌ Database restore failed"
+        handle_error "Failed to restore database for app: $app_name" $ERROR_DATABASE
         return 1
     fi
 }
 
 # =============================================
-# Database Optimization Functions
+# Database Maintenance Functions
 # =============================================
 
 optimize_app_database() {
     local app_name="$1"
-
-    if [ -z "$app_name" ]; then
-        log_error "Usage: optimize_app_database <app-name>"
+    
+    log_info "⚡ Optimizing database for app: $app_name"
+    
+    local db_password_file="/root/.laravel-apps/${app_name}_db_password"
+    if [ ! -f "$db_password_file" ]; then
+        handle_error "Database password file not found for app: $app_name" $ERROR_CONFIGURATION
         return 1
     fi
-
-    # Load app config
-    local app_config="$CONFIG_DIR/$app_name.conf"
-    source "$app_config"
-
-    log_info "⚡ Optimizing database $DB_NAME"
-
+    
+    local db_password=$(cat "$db_password_file")
+    
     # Optimize tables
-    if mysql -u "$DB_USER" -p"$DB_PASSWORD" -e "USE $DB_NAME; OPTIMIZE TABLE $(mysql -u "$DB_USER" -p"$DB_PASSWORD" -e "USE $DB_NAME; SHOW TABLES;" | tail -n +2 | tr '\n' ',' | sed 's/,$//');" 2>/dev/null; then
-        log_info "✅ Database optimization completed"
+    mysql -u "$app_name" -p"$db_password" -e "
+        SELECT CONCAT('OPTIMIZE TABLE \`', table_name, '\`;') 
+        FROM information_schema.tables 
+        WHERE table_schema = '$app_name';" | grep "OPTIMIZE TABLE" | mysql -u "$app_name" -p"$db_password" "$app_name"
+    
+    if [ $? -eq 0 ]; then
+        log_info "✅ Database optimized for app: $app_name"
     else
-        log_warning "⚠️  Database optimization failed"
+        handle_error "Failed to optimize database for app: $app_name" $ERROR_DATABASE
+        return 1
     fi
+}
+
+get_database_size() {
+    local app_name="$1"
+    
+    local root_password=$(get_mysql_root_password)
+    if [ -z "$root_password" ]; then
+        return 1
+    fi
+    
+    local size=$(mysql -u root -p"$root_password" -e "
+        SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS 'DB Size in MB'
+        FROM information_schema.tables
+        WHERE table_schema = '$app_name';" 2>/dev/null | tail -1)
+    
+    echo "${size:-0}"
 }

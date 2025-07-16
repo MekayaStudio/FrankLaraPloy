@@ -66,129 +66,91 @@ octane_install() {
 }
 
 octane_start() {
-    local target_dir="${1:-$(pwd)}"
-    local host="${2:-0.0.0.0}"
-    local port="${3:-8000}"
-
-    if [ ! -d "$target_dir" ]; then
-        log_error "Directory not found: $target_dir"
+    local app_name="${1:-}"
+    
+    if [ -z "$app_name" ]; then
+        log_error "App name is required"
         return 1
     fi
-
-    cd "$target_dir"
-
-    # Check if it's a Laravel project with Octane
-    if [ ! -f "artisan" ]; then
-        log_error "Not a Laravel project (artisan not found)"
+    
+    local app_dir="$APPS_BASE_DIR/$app_name"
+    
+    if [ ! -d "$app_dir" ]; then
+        log_error "App directory not found: $app_dir"
         return 1
     fi
-
-    if ! php artisan list | grep -q "octane:start"; then
-        log_error "Laravel Octane not installed. Run: octane_install"
+    
+    log_info "▶️  Starting Octane server for app: $app_name"
+    
+    # Start systemd service
+    if systemctl start "laravel-octane-$app_name"; then
+        log_info "✅ Octane server started successfully"
+    else
+        log_error "Failed to start Octane server"
         return 1
     fi
-
-    log_info "🚀 Starting Octane server..."
-    log_info "🌐 Server will be available at: http://$host:$port"
-
-    # Start Octane server
-    php artisan octane:start --server=frankenphp --host="$host" --port="$port"
 }
 
 octane_stop() {
-    local target_dir="${1:-$(pwd)}"
-
-    if [ ! -d "$target_dir" ]; then
-        log_error "Directory not found: $target_dir"
+    local app_name="${1:-}"
+    
+    if [ -z "$app_name" ]; then
+        log_error "App name is required"
         return 1
     fi
-
-    cd "$target_dir"
-
-    log_info "🛑 Stopping Octane server..."
-    php artisan octane:stop || log_info "Server might already be stopped"
-
-    log_info "✅ Octane server stopped"
+    
+    log_info "⏹️  Stopping Octane server for app: $app_name"
+    
+    # Stop systemd service
+    if systemctl stop "laravel-octane-$app_name"; then
+        log_info "✅ Octane server stopped successfully"
+    else
+        log_error "Failed to stop Octane server"
+        return 1
+    fi
 }
 
 octane_restart() {
-    local target_dir="${1:-$(pwd)}"
-
-    log_info "🔄 Restarting Octane server..."
-    octane_stop "$target_dir"
-    sleep 2
-    octane_start "$target_dir"
+    local app_name="${1:-}"
+    
+    if [ -z "$app_name" ]; then
+        log_error "App name is required"
+        return 1
+    fi
+    
+    log_info "🔄 Restarting Octane server for app: $app_name"
+    
+    # Restart systemd service
+    if systemctl restart "laravel-octane-$app_name"; then
+        log_info "✅ Octane server restarted successfully"
+    else
+        log_error "Failed to restart Octane server"
+        return 1
+    fi
 }
 
 octane_status() {
-    local target_dir="${1:-$(pwd)}"
-
-    if [ ! -d "$target_dir" ]; then
-        log_error "Directory not found: $target_dir"
+    local app_name="${1:-}"
+    
+    if [ -z "$app_name" ]; then
+        log_error "App name is required"
         return 1
     fi
-
-    cd "$target_dir"
-
-    log_info "📊 Checking Octane status..."
-
-    # Check if Octane is installed
-    if ! php artisan list | grep -q "octane:start"; then
-        log_error "Laravel Octane not installed"
-        return 1
-    fi
-
-    # Check if server is running
-    if php artisan octane:status 2>/dev/null; then
-        log_info "✅ Octane server is running"
-    else
-        log_info "⚠️  Octane server is not running"
-    fi
-
-    # Check process
-    if pgrep -f "octane:start" > /dev/null; then
-        log_info "✅ Octane process found"
-        log_info "🔍 Process details:"
-        ps aux | grep "octane:start" | grep -v grep
-    else
-        log_info "⚠️  No Octane process found"
-    fi
-
-    # Check port
-    if netstat -tlnp 2>/dev/null | grep -q ":8000"; then
-        log_info "✅ Port 8000 is listening"
-    else
-        log_info "⚠️  Port 8000 is not listening"
-    fi
+    
+    log_info "📊 Octane server status for app: $app_name"
+    
+    # Show systemd service status
+    systemctl status "laravel-octane-$app_name" --no-pager
 }
 
-octane_optimize() {
-    local target_dir="${1:-$(pwd)}"
-
-    if [ ! -d "$target_dir" ]; then
-        log_error "Directory not found: $target_dir"
-        return 1
-    fi
-
-    cd "$target_dir"
-
-    log_info "⚡ Optimizing Laravel for production..."
-
-    # Clear caches
-    php artisan cache:clear
-    php artisan config:clear
-    php artisan route:clear
-    php artisan view:clear
-
-    # Optimize for production
-    php artisan config:cache
-    php artisan route:cache
-    php artisan view:cache
-
-    # Optimize Composer autoload
-    composer dump-autoload --optimize
-
-    log_info "✅ Laravel optimization completed"
+octane_create_service() {
+    local app_name="$1"
+    local port="${2:-8000}"
+    
+    log_info "🔧 Creating Octane systemd service for app: $app_name"
+    
+    # Use systemd manager to create service
+    create_octane_service "$app_name" "$port"
 }
 
 # =============================================

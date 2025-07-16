@@ -11,9 +11,138 @@ if [ -n "$SYSTEMD_MANAGER_LOADED" ]; then
 fi
 export SYSTEMD_MANAGER_LOADED=1
 
+# Load dependencies
+if [ -z "$SHARED_FUNCTIONS_LOADED" ]; then
+    source "$SCRIPT_DIR/lib/shared-functions.sh"
+fi
+if [ -z "$ERROR_HANDLER_LOADED" ]; then
+    source "$SCRIPT_DIR/lib/error-handler.sh"
+fi
+
 # =============================================
 # Systemd Service Functions
 # =============================================
+
+create_octane_service() {
+    local app_name="$1"
+    local port="${2:-8000}"
+    
+    log_info "🔧 Creating Octane systemd service for app: $app_name"
+    
+    local app_dir="$APPS_BASE_DIR/$app_name"
+    local service_file="/etc/systemd/system/laravel-octane-${app_name}.service"
+    
+    # Create service file
+    cat > "$service_file" << EOF
+[Unit]
+Description=Laravel Octane Server for $app_name
+After=network.target
+Requires=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=$app_dir
+ExecStart=/usr/bin/php $app_dir/artisan octane:start --server=frankenphp --host=127.0.0.1 --port=$port
+ExecReload=/bin/kill -USR2 \$MAINPID
+KillMode=mixed
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+
+# Environment variables
+Environment=APP_ENV=production
+Environment=APP_DEBUG=false
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=$app_dir/storage $app_dir/bootstrap/cache
+ProtectHome=true
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=laravel-octane-$app_name
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    # Set permissions
+    chmod 644 "$service_file"
+    
+    # Reload systemd
+    systemctl daemon-reload
+    
+    log_info "✅ Octane service created: laravel-octane-$app_name"
+}
+
+create_queue_worker_service() {
+    local app_name="$1"
+    
+    log_info "🔧 Creating queue worker systemd service for app: $app_name"
+    
+    local app_dir="$APPS_BASE_DIR/$app_name"
+    local service_file="/etc/systemd/system/laravel-queue-${app_name}.service"
+    
+    # Create service file
+    cat > "$service_file" << EOF
+[Unit]
+Description=Laravel Queue Worker for $app_name
+After=network.target
+Requires=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=$app_dir
+ExecStart=/usr/bin/php $app_dir/artisan queue:work --sleep=3 --tries=3 --timeout=90
+ExecReload=/bin/kill -USR2 \$MAINPID
+KillMode=mixed
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+
+# Environment variables
+Environment=APP_ENV=production
+Environment=APP_DEBUG=false
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=$app_dir/storage $app_dir/bootstrap/cache
+ProtectHome=true
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=laravel-queue-$app_name
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    # Set permissions
+    chmod 644 "$service_file"
+    
+    # Reload systemd
+    systemctl daemon-reload
+    
+    log_info "✅ Queue worker service created: laravel-queue-$app_name"
+}
 
 systemd_check_service() {
     local service_name="$1"
@@ -24,8 +153,8 @@ systemd_check_service() {
     fi
 
     # Handle service name variations
-    if [[ "$service_name" != frankenphp-* ]]; then
-        service_name="frankenphp-$service_name"
+    if [[ "$service_name" != laravel-* ]]; then
+        service_name="laravel-octane-$service_name"
     fi
 
     log_info "🔍 Checking service: $service_name"
@@ -48,385 +177,280 @@ systemd_check_service() {
     log_info "📋 Recent logs (last 20 lines):"
     journalctl -u "$service_name" -n 20 --no-pager
 
-    # Check if service is enabled
-    if systemctl is-enabled --quiet "$service_name"; then
-        log_info "✅ Service is enabled (will start on boot)"
-    else
-        log_warning "⚠️  Service is not enabled"
-    fi
+    return 0
 }
 
 systemd_fix_service() {
-    local service_name="$1"
-
-    if [ -z "$service_name" ]; then
-        log_error "Usage: systemd_fix_service <service-name>"
+    local app_name="$1"
+    
+    if [ -z "$app_name" ]; then
+        log_error "Usage: systemd_fix_service <app-name>"
         return 1
     fi
-
-    # Handle service name variations
-    if [[ "$service_name" != frankenphp-* ]]; then
-        service_name="frankenphp-$service_name"
+    
+    log_info "🔧 Fixing systemd service for app: $app_name"
+    
+    local app_dir="$APPS_BASE_DIR/$app_name"
+    if [ ! -d "$app_dir" ]; then
+        handle_error "App directory not found: $app_dir" $ERROR_FILESYSTEM
+        return 1
     fi
-
-    log_info "🔧 Fixing systemd service: $service_name"
-
-    # Stop service if running
-    log_info "🛑 Stopping service..."
-    systemctl stop "$service_name" || true
-
-    # Fix common issues
-    local issues_fixed=0
-
-    # Fix 1: Reload systemd daemon
-    log_info "🔄 Reloading systemd daemon..."
+    
+    # Stop services
+    systemctl stop "laravel-octane-$app_name" 2>/dev/null || true
+    systemctl stop "laravel-queue-$app_name" 2>/dev/null || true
+    
+    # Remove old service files
+    rm -f "/etc/systemd/system/laravel-octane-$app_name.service"
+    rm -f "/etc/systemd/system/laravel-queue-$app_name.service"
+    
+    # Reload systemd
     systemctl daemon-reload
-    issues_fixed=$((issues_fixed + 1))
-
-    # Fix 2: Reset failed state
-    log_info "🧹 Resetting failed state..."
-    systemctl reset-failed "$service_name" || true
-    issues_fixed=$((issues_fixed + 1))
-
-    # Fix 3: Check service file permissions
-    local service_file="/etc/systemd/system/$service_name.service"
-    if [ -f "$service_file" ]; then
-        log_info "🔐 Fixing service file permissions..."
-        chmod 644 "$service_file"
-        issues_fixed=$((issues_fixed + 1))
+    
+    # Recreate services
+    create_octane_service "$app_name"
+    create_queue_worker_service "$app_name"
+    
+    # Enable and start services
+    systemctl enable "laravel-octane-$app_name"
+    systemctl start "laravel-octane-$app_name"
+    
+    # Enable queue worker if it has queue configuration
+    if cd "$app_dir" && php artisan list | grep -q "queue:work"; then
+        systemctl enable "laravel-queue-$app_name"
+        systemctl start "laravel-queue-$app_name"
     fi
-
-    # Fix 4: Enable service
-    log_info "⚙️  Enabling service..."
-    systemctl enable "$service_name"
-    issues_fixed=$((issues_fixed + 1))
-
-    # Fix 5: Start service
-    log_info "🚀 Starting service..."
-    if systemctl start "$service_name"; then
-        log_info "✅ Service started successfully"
-        issues_fixed=$((issues_fixed + 1))
-    else
-        log_error "❌ Failed to start service"
-        log_info "📋 Checking logs for errors..."
-        journalctl -u "$service_name" -n 10 --no-pager
-        return 1
-    fi
-
-    log_info "✅ Service fix completed! Fixed $issues_fixed issues"
-
-    # Show final status
-    systemctl status "$service_name" --no-pager -l
+    
+    log_info "✅ Service fixed for app: $app_name"
 }
 
 systemd_fix_all_services() {
-    log_info "🔧 Fixing all FrankenPHP services..."
-
-    local services_fixed=0
-    local services_found=0
-
-    # Find all frankenphp services
-    for service_file in /etc/systemd/system/frankenphp-*.service; do
-        if [ -f "$service_file" ]; then
-            local service_name=$(basename "$service_file" .service)
-            services_found=$((services_found + 1))
-
-            log_info "Processing service: $service_name"
-            if systemd_fix_service "$service_name"; then
-                services_fixed=$((services_fixed + 1))
+    log_info "🔧 Fixing all systemd services..."
+    
+    if [ ! -d "$APPS_BASE_DIR" ]; then
+        log_error "Apps directory not found: $APPS_BASE_DIR"
+        return 1
+    fi
+    
+    local fixed_count=0
+    
+    for app_dir in "$APPS_BASE_DIR"/*; do
+        if [ -d "$app_dir" ]; then
+            local app_name=$(basename "$app_dir")
+            log_info "🔧 Fixing service for app: $app_name"
+            
+            if systemd_fix_service "$app_name"; then
+                ((fixed_count++))
             fi
-            echo ""
         fi
     done
-
-    if [ $services_found -eq 0 ]; then
-        log_info "No frankenphp services found to fix"
-    else
-        log_info "✅ Fixed $services_fixed out of $services_found services"
-    fi
+    
+    log_info "✅ Fixed $fixed_count services"
 }
 
 systemd_list_services() {
-    log_info "📋 Listing all FrankenPHP services:"
+    log_info "📋 Laravel Octane systemd services:"
+    
     echo ""
-    printf "%-30s %-15s %-10s %-15s\n" "Service" "Status" "Enabled" "App"
-    echo "======================================================================="
-
-    local services_found=0
-
-    # Find all frankenphp services
-    for service_file in /etc/systemd/system/frankenphp-*.service; do
+    printf "%-30s %-10s %-10s %-s\n" "SERVICE NAME" "STATUS" "ENABLED" "DESCRIPTION"
+    printf "%-30s %-10s %-10s %-s\n" "------------" "------" "-------" "-----------"
+    
+    # List all Laravel Octane services
+    for service_file in /etc/systemd/system/laravel-octane-*.service; do
         if [ -f "$service_file" ]; then
             local service_name=$(basename "$service_file" .service)
-            local app_name=${service_name#frankenphp-}
-
+            local app_name=${service_name#laravel-octane-}
+            
             # Get service status
-            local status="stopped"
+            local status="inactive"
             if systemctl is-active --quiet "$service_name"; then
-                status="running"
-            elif systemctl is-failed --quiet "$service_name"; then
-                status="failed"
+                status="active"
             fi
-
+            
             # Get enabled status
             local enabled="disabled"
             if systemctl is-enabled --quiet "$service_name"; then
                 enabled="enabled"
             fi
-
-            printf "%-30s %-15s %-10s %-15s\n" "$service_name" "$status" "$enabled" "$app_name"
-            services_found=$((services_found + 1))
+            
+            printf "%-30s %-10s %-10s %-s\n" "$service_name" "$status" "$enabled" "Laravel Octane for $app_name"
         fi
     done
-
-    if [ $services_found -eq 0 ]; then
-        log_info "No FrankenPHP services found"
-    else
-        echo ""
-        log_info "Total services: $services_found"
-    fi
+    
+    # List all Laravel Queue services
+    for service_file in /etc/systemd/system/laravel-queue-*.service; do
+        if [ -f "$service_file" ]; then
+            local service_name=$(basename "$service_file" .service)
+            local app_name=${service_name#laravel-queue-}
+            
+            # Get service status
+            local status="inactive"
+            if systemctl is-active --quiet "$service_name"; then
+                status="active"
+            fi
+            
+            # Get enabled status
+            local enabled="disabled"
+            if systemctl is-enabled --quiet "$service_name"; then
+                enabled="enabled"
+            fi
+            
+            printf "%-30s %-10s %-10s %-s\n" "$service_name" "$status" "$enabled" "Laravel Queue for $app_name"
+        fi
+    done
+    
+    echo ""
 }
 
-# =============================================
-# Service Management Functions
-# =============================================
-
-systemd_start_service() {
-    local service_name="$1"
-
-    if [ -z "$service_name" ]; then
-        log_error "Usage: systemd_start_service <service-name>"
-        return 1
-    fi
-
-    # Handle service name variations
-    if [[ "$service_name" != frankenphp-* ]]; then
-        service_name="frankenphp-$service_name"
-    fi
-
-    log_info "🚀 Starting service: $service_name"
-
-    if systemctl start "$service_name"; then
-        log_info "✅ Service started successfully"
-        systemctl status "$service_name" --no-pager -l
-    else
-        log_error "❌ Failed to start service"
-        journalctl -u "$service_name" -n 10 --no-pager
-        return 1
-    fi
-}
-
-systemd_stop_service() {
-    local service_name="$1"
-
-    if [ -z "$service_name" ]; then
-        log_error "Usage: systemd_stop_service <service-name>"
-        return 1
-    fi
-
-    # Handle service name variations
-    if [[ "$service_name" != frankenphp-* ]]; then
-        service_name="frankenphp-$service_name"
-    fi
-
-    log_info "🛑 Stopping service: $service_name"
-
-    if systemctl stop "$service_name"; then
-        log_info "✅ Service stopped successfully"
-    else
-        log_error "❌ Failed to stop service"
-        return 1
-    fi
-}
-
-systemd_restart_service() {
-    local service_name="$1"
-
-    if [ -z "$service_name" ]; then
-        log_error "Usage: systemd_restart_service <service-name>"
-        return 1
-    fi
-
-    # Handle service name variations
-    if [[ "$service_name" != frankenphp-* ]]; then
-        service_name="frankenphp-$service_name"
-    fi
-
-    log_info "🔄 Restarting service: $service_name"
-
-    if systemctl restart "$service_name"; then
-        log_info "✅ Service restarted successfully"
-        systemctl status "$service_name" --no-pager -l
-    else
-        log_error "❌ Failed to restart service"
-        journalctl -u "$service_name" -n 10 --no-pager
-        return 1
-    fi
-}
-
-systemd_enable_service() {
-    local service_name="$1"
-
-    if [ -z "$service_name" ]; then
-        log_error "Usage: systemd_enable_service <service-name>"
-        return 1
-    fi
-
-    # Handle service name variations
-    if [[ "$service_name" != frankenphp-* ]]; then
-        service_name="frankenphp-$service_name"
-    fi
-
-    log_info "⚙️  Enabling service: $service_name"
-
-    if systemctl enable "$service_name"; then
-        log_info "✅ Service enabled successfully"
-    else
-        log_error "❌ Failed to enable service"
-        return 1
-    fi
-}
-
-systemd_disable_service() {
-    local service_name="$1"
-
-    if [ -z "$service_name" ]; then
-        log_error "Usage: systemd_disable_service <service-name>"
-        return 1
-    fi
-
-    # Handle service name variations
-    if [[ "$service_name" != frankenphp-* ]]; then
-        service_name="frankenphp-$service_name"
-    fi
-
-    log_info "⚙️  Disabling service: $service_name"
-
-    if systemctl disable "$service_name"; then
-        log_info "✅ Service disabled successfully"
-    else
-        log_error "❌ Failed to disable service"
-        return 1
-    fi
-}
-
-# =============================================
-# Service Creation Functions
-# =============================================
-
-create_frankenphp_service() {
+restart_app_services() {
     local app_name="$1"
-    local app_dir="$2"
-    local domain="$3"
-    local port="${4:-8000}"
-
-    if [ -z "$app_name" ] || [ -z "$app_dir" ] || [ -z "$domain" ]; then
-        log_error "Usage: create_frankenphp_service <app-name> <app-dir> <domain> [port]"
-        return 1
+    
+    log_info "🔄 Restarting services for app: $app_name"
+    
+    # Restart Octane service
+    if systemctl is-active --quiet "laravel-octane-$app_name"; then
+        systemctl restart "laravel-octane-$app_name"
+        log_info "✅ Restarted Octane service"
     fi
+    
+    # Restart Queue service
+    if systemctl is-active --quiet "laravel-queue-$app_name"; then
+        systemctl restart "laravel-queue-$app_name"
+        log_info "✅ Restarted Queue service"
+    fi
+}
 
-    local service_name="frankenphp-$app_name"
-    local service_file="/etc/systemd/system/$service_name.service"
+stop_app_services() {
+    local app_name="$1"
+    
+    log_info "🛑 Stopping services for app: $app_name"
+    
+    # Stop Octane service
+    if systemctl is-active --quiet "laravel-octane-$app_name"; then
+        systemctl stop "laravel-octane-$app_name"
+        log_info "✅ Stopped Octane service"
+    fi
+    
+    # Stop Queue service
+    if systemctl is-active --quiet "laravel-queue-$app_name"; then
+        systemctl stop "laravel-queue-$app_name"
+        log_info "✅ Stopped Queue service"
+    fi
+}
 
-    log_info "📝 Creating systemd service: $service_name"
-
-    cat > "$service_file" << EOF
-[Unit]
-Description=FrankenPHP Server for $app_name
-After=network.target mysql.service
-Requires=network.target
-Wants=mysql.service
-
-[Service]
-Type=simple
-User=www-data
-Group=www-data
-WorkingDirectory=$app_dir
-ExecStart=/usr/bin/php artisan octane:start --server=frankenphp --host=0.0.0.0 --port=$port
-ExecReload=/bin/kill -USR2 \$MAINPID
-Restart=always
-RestartSec=3
-StandardOutput=journal
-StandardError=journal
-
-# Resource limits
-LimitNOFILE=65536
-LimitNPROC=4096
-
-# Security settings
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ReadWritePaths=$app_dir
-ReadWritePaths=/var/log/frankenphp
-ReadWritePaths=/tmp
-
-# Environment
-Environment=APP_ENV=production
-Environment=APP_DEBUG=false
-Environment=LOG_CHANNEL=stack
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    # Set proper permissions
-    chmod 644 "$service_file"
-
-    # Reload systemd and enable service
-    systemctl daemon-reload
-    systemctl enable "$service_name"
-
-    log_info "✅ Service created and enabled: $service_name"
-    log_info "🚀 To start: systemctl start $service_name"
+start_app_services() {
+    local app_name="$1"
+    
+    log_info "▶️  Starting services for app: $app_name"
+    
+    # Start Octane service
+    if systemctl is-enabled --quiet "laravel-octane-$app_name"; then
+        systemctl start "laravel-octane-$app_name"
+        log_info "✅ Started Octane service"
+    fi
+    
+    # Start Queue service
+    if systemctl is-enabled --quiet "laravel-queue-$app_name"; then
+        systemctl start "laravel-queue-$app_name"
+        log_info "✅ Started Queue service"
+    fi
 }
 
 # =============================================
 # Service Monitoring Functions
 # =============================================
 
-systemd_monitor_service() {
+monitor_service_health() {
     local service_name="$1"
-    local interval="${2:-5}"
-
-    if [ -z "$service_name" ]; then
-        log_error "Usage: systemd_monitor_service <service-name> [interval]"
-        return 1
-    fi
-
-    # Handle service name variations
-    if [[ "$service_name" != frankenphp-* ]]; then
-        service_name="frankenphp-$service_name"
-    fi
-
-    log_info "📊 Monitoring service: $service_name (every ${interval}s)"
-    log_info "Press Ctrl+C to stop monitoring"
-
+    local max_failures="${2:-3}"
+    
+    log_info "👁️  Monitoring service health: $service_name"
+    
+    local failure_count=0
+    local check_interval=30
+    
     while true; do
-        clear
-        echo "$(date) - Service Status for $service_name"
-        echo "=================================================="
-        systemctl status "$service_name" --no-pager -l
-        echo ""
-        echo "Recent logs:"
-        journalctl -u "$service_name" -n 5 --no-pager
-        sleep "$interval"
+        if systemctl is-active --quiet "$service_name"; then
+            if [ $failure_count -gt 0 ]; then
+                log_info "✅ Service $service_name is healthy again"
+                failure_count=0
+            fi
+        else
+            ((failure_count++))
+            log_warning "⚠️  Service $service_name is not running (failure $failure_count/$max_failures)"
+            
+            if [ $failure_count -ge $max_failures ]; then
+                log_error "❌ Service $service_name has failed $max_failures times"
+                # Attempt to restart
+                systemctl restart "$service_name"
+                failure_count=0
+            fi
+        fi
+        
+        sleep $check_interval
     done
 }
 
-systemd_logs_follow() {
-    local service_name="$1"
-
-    if [ -z "$service_name" ]; then
-        log_error "Usage: systemd_logs_follow <service-name>"
-        return 1
+get_service_port() {
+    local app_name="$1"
+    
+    local service_file="/etc/systemd/system/laravel-octane-$app_name.service"
+    if [ -f "$service_file" ]; then
+        # Extract port from service file
+        local port=$(grep -o '\--port=[0-9]\+' "$service_file" | cut -d'=' -f2)
+        echo "${port:-8000}"
+    else
+        echo "8000"
     fi
+}
 
-    # Handle service name variations
-    if [[ "$service_name" != frankenphp-* ]]; then
-        service_name="frankenphp-$service_name"
+# =============================================
+# Service Cleanup Functions
+# =============================================
+
+cleanup_orphaned_services() {
+    log_info "🧹 Cleaning up orphaned services..."
+    
+    local cleaned_count=0
+    
+    # Check Laravel Octane services
+    for service_file in /etc/systemd/system/laravel-octane-*.service; do
+        if [ -f "$service_file" ]; then
+            local service_name=$(basename "$service_file" .service)
+            local app_name=${service_name#laravel-octane-}
+            
+            # Check if app directory exists
+            if [ ! -d "$APPS_BASE_DIR/$app_name" ]; then
+                log_info "🗑️  Removing orphaned service: $service_name"
+                systemctl stop "$service_name" 2>/dev/null || true
+                systemctl disable "$service_name" 2>/dev/null || true
+                rm -f "$service_file"
+                ((cleaned_count++))
+            fi
+        fi
+    done
+    
+    # Check Laravel Queue services
+    for service_file in /etc/systemd/system/laravel-queue-*.service; do
+        if [ -f "$service_file" ]; then
+            local service_name=$(basename "$service_file" .service)
+            local app_name=${service_name#laravel-queue-}
+            
+            # Check if app directory exists
+            if [ ! -d "$APPS_BASE_DIR/$app_name" ]; then
+                log_info "🗑️  Removing orphaned service: $service_name"
+                systemctl stop "$service_name" 2>/dev/null || true
+                systemctl disable "$service_name" 2>/dev/null || true
+                rm -f "$service_file"
+                ((cleaned_count++))
+            fi
+        fi
+    done
+    
+    if [ $cleaned_count -gt 0 ]; then
+        systemctl daemon-reload
+        log_info "✅ Cleaned up $cleaned_count orphaned services"
+    else
+        log_info "✅ No orphaned services found"
     fi
-
-    log_info "📋 Following logs for service: $service_name"
-    journalctl -u "$service_name" -f
 }

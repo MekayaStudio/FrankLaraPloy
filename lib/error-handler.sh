@@ -136,6 +136,32 @@ set_error() {
     fi
 }
 
+# Handle error
+handle_error() {
+    local error_msg="$1"
+    local error_code="${2:-$ERROR_UNKNOWN}"
+    local context="${3:-$(basename "$0")}"
+    
+    # Set error state
+    ERROR_OCCURRED=true
+    ERROR_CODE="$error_code"
+    ERROR_MESSAGE="$error_msg"
+    ERROR_CONTEXT="$context"
+    ERROR_TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+    ERROR_STACK_TRACE=$(generate_stack_trace)
+    
+    # Log error
+    log_error_to_file "$error_msg" "$error_code" "$context"
+    
+    # Display error
+    log_error "$error_msg"
+    
+    # Set rollback needed
+    ROLLBACK_NEEDED=true
+    
+    return "$error_code"
+}
+
 # Clear error state
 clear_error() {
     ERROR_OCCURRED=false
@@ -547,6 +573,30 @@ init_error_handler() {
     ensure_directory "$LOG_DIR"
 
     log_debug "Error handler initialized"
+}
+
+# =============================================
+# Error Setup Functions
+# =============================================
+
+setup_error_handling() {
+    # Set up error handling
+    set -euo pipefail
+    
+    # Set up error trap
+    trap 'handle_error "Script failed at line $LINENO" $ERROR_UNKNOWN' ERR
+    
+    # Initialize error state
+    ERROR_OCCURRED=false
+    ERROR_CODE=0
+    ERROR_MESSAGE=""
+    ERROR_CONTEXT=""
+    ERROR_TIMESTAMP=""
+    ERROR_STACK_TRACE=""
+    
+    # Initialize rollback state
+    ROLLBACK_NEEDED=false
+    ROLLBACK_ACTIONS=()
 }
 
 # Auto-initialize when sourced (only for root commands)

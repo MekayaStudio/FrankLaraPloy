@@ -85,41 +85,96 @@ setup_laravel_app() {
     local db_name="$4"
     local app_dir="$5"
 
-    # Create app directory and clone repository
+    log_info "🏗️ Setting up Laravel application: $app_name"
+
+    # Create app directory with proper permissions from the start
     mkdir -p "$app_dir"
+    
+    # Clone or create Laravel app
     if [ -n "$github_repo" ]; then
         log_info "📥 Cloning from GitHub: $github_repo"
-        git clone "$github_repo" "$app_dir"
+        
+        # Clone as root first, then fix permissions
+        if ! git clone "$github_repo" "$app_dir"; then
+            log_error "Failed to clone repository: $github_repo"
+            return 1
+        fi
+        
+        # Set ownership to www-data immediately after clone
+        chown -R www-data:www-data "$app_dir"
+        
+        # Navigate to directory
+        cd "$app_dir"
+        
+        # Install dependencies as www-data
+        log_info "📦 Installing Composer dependencies..."
+        sudo -u www-data composer install --no-dev --optimize-autoloader
+        
     else
-        log_info "📁 Creating Laravel app with composer"
-        composer create-project laravel/laravel "$app_dir"
+        log_info "📁 Creating fresh Laravel app with composer"
+        
+        # Create Laravel project as www-data user
+        sudo -u www-data composer create-project laravel/laravel "$app_dir"
+        
+        # Navigate to directory
+        cd "$app_dir"
     fi
 
-    # Setup Laravel environment
-    cd "$app_dir"
+    # Setup Laravel environment (as www-data)
     if [ -f "composer.json" ]; then
-        log_info "📦 Installing Composer dependencies"
-        composer install --no-dev --optimize-autoloader
-
-        # Setup environment
-        if [ -f ".env.example" ]; then
-            cp .env.example .env
+        log_info "⚙️ Configuring Laravel environment..."
+        
+        # Setup environment file
+        if [ -f ".env.example" ] && [ ! -f ".env" ]; then
+            sudo -u www-data cp .env.example .env
         fi
 
         # Generate app key
-        php artisan key:generate
+        sudo -u www-data php artisan key:generate --force
 
         # Setup database configuration
         setup_database_config "$app_name" "$db_name"
 
+        # Create necessary directories with proper permissions
+        sudo -u www-data mkdir -p storage/logs storage/framework/{cache,sessions,views}
+        sudo -u www-data mkdir -p bootstrap/cache
+        
         # Run migrations
-        php artisan migrate --force
+        log_info "🗄️ Running database migrations..."
+        sudo -u www-data php artisan migrate --force
+        
+        # Cache configuration for better performance
+        log_info "⚡ Caching configuration..."
+        sudo -u www-data php artisan config:cache
+        sudo -u www-data php artisan route:cache
+        sudo -u www-data php artisan view:cache
+        
+    else
+        log_error "Invalid Laravel project (composer.json not found)"
+        return 1
     fi
 
-    # Set permissions
+    # Set final permissions properly
+    log_info "🔧 Setting proper file permissions..."
+    
+    # Set directory ownership
     chown -R www-data:www-data "$app_dir"
-    chmod -R 755 "$app_dir"
-    chmod -R 775 "$app_dir/storage" "$app_dir/bootstrap/cache"
+    
+    # Set directory permissions
+    find "$app_dir" -type d -exec chmod 755 {} \;
+    find "$app_dir" -type f -exec chmod 644 {} \;
+    
+    # Set executable permissions for artisan
+    chmod +x "$app_dir/artisan"
+    
+    # Set proper permissions for storage and bootstrap/cache
+    chmod -R 775 "$app_dir/storage"
+    chmod -R 775 "$app_dir/bootstrap/cache"
+    
+    # Secure sensitive files
+    chmod 600 "$app_dir/.env"
+    
+    log_info "✅ Laravel application setup completed"
 }
 
 install_octane() {
@@ -129,7 +184,7 @@ install_octane() {
 
     cd "$app_dir"
 
-    log_info "🔧 Setting up Laravel Octane for $app_name"
+    log_info "🔧 Setting up Laravel Octane with FrankenPHP for $app_name"
 
     # Check if Octane is already installed
     if check_octane_installed; then
@@ -140,19 +195,20 @@ install_octane() {
             log_info "✅ FrankenPHP already configured"
         else
             log_info "🔧 Configuring FrankenPHP..."
-            configure_frankenphp
+            configure_frankenphp_proper "$app_name" "$domain"
         fi
     else
         log_info "📦 Installing Laravel Octane..."
 
-        # Install Octane
-        if ! composer require laravel/octane; then
+        # Install Octane as www-data user
+        if ! sudo -u www-data composer require laravel/octane; then
             log_error "Failed to install Laravel Octane"
             return 1
         fi
 
         # Install with FrankenPHP
-        if ! php artisan octane:install --server=frankenphp; then
+        log_info "🔧 Configuring Octane with FrankenPHP..."
+        if ! sudo -u www-data php artisan octane:install --server=frankenphp; then
             log_error "Failed to configure Octane with FrankenPHP"
             return 1
         fi
@@ -160,8 +216,14 @@ install_octane() {
         log_info "✅ Laravel Octane installed successfully"
     fi
 
-    # Always update .env for production (regardless of Octane status)
+    # Setup production environment
     setup_production_env "$domain"
+
+    # Setup FrankenPHP-specific configuration
+    setup_frankenphp_config "$app_name" "$domain"
+
+    # Create TLS storage directory
+    setup_tls_storage "$app_name"
 
     # Optimize for production
     optimize_laravel_app
@@ -255,14 +317,217 @@ install_octane_enhanced() {
     log_info "✅ Laravel Octane setup completed for $app_name"
 }
 
+configure_frankenphp_proper() {
+    local app_name="$1"
+    local domain="$2"
+    
+    log_info "🔧 Configuring FrankenPHP properly for $app_name"
+    
+    # Update config/octane.php for FrankenPHP
+    if [ -f "config/octane.php" ]; then
+        log_info "⚙️ Updating Octane configuration..."
+        
+        # Create proper FrankenPHP configuration
+        sudo -u www-data php artisan octane:install --server=frankenphp
+        
+        # Update .env for FrankenPHP
+        update_env_for_frankenphp "$domain"
+    fi
+}
+
+setup_frankenphp_config() {
+    local app_name="$1"
+    local domain="$2"
+    
+    log_info "📝 Setting up FrankenPHP configuration for $app_name"
+    
+    # Create Caddyfile for FrankenPHP
+    create_caddyfile "$app_name" "$domain"
+    
+    # Update .env for FrankenPHP settings
+    update_env_for_frankenphp "$domain"
+}
+
+create_caddyfile() {
+    local app_name="$1"
+    local domain="$2"
+    
+    log_info "📝 Creating Caddyfile for $app_name"
+    
+    # Create Caddyfile with proper configuration
+    cat > "Caddyfile" << EOF
+{
+    # Global options
+    auto_https on
+    admin off
+    
+    # Logging
+    log {
+        level INFO
+        output file /var/log/frankenphp/$app_name.log
+    }
+}
+
+# Main site
+$domain {
+    # Document root
+    root * public
+    
+    # Security headers
+    header {
+        -Server
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy strict-origin-when-cross-origin
+    }
+    
+    # Enable compression
+    encode gzip
+    
+    # PHP handling
+    php_fastcgi unix//run/php/php8.3-fpm.sock
+    
+    # Laravel-specific rules
+    try_files {path} {path}/ /index.php?{query}
+    
+    # Static assets caching
+    @static {
+        path *.css *.js *.ico *.png *.jpg *.jpeg *.gif *.svg *.woff *.woff2 *.ttf *.otf
+    }
+    header @static Cache-Control "public, max-age=31536000"
+    
+    # Deny sensitive files
+    respond /storage/app/private/* 404
+    respond /.env* 404
+    respond /composer.* 404
+    respond /artisan 404
+}
+
+# Redirect www to non-www
+www.$domain {
+    redir https://$domain{uri} permanent
+}
+EOF
+    
+    # Set proper ownership
+    chown www-data:www-data "Caddyfile"
+    chmod 644 "Caddyfile"
+    
+    log_info "✅ Caddyfile created"
+}
+
+update_env_for_frankenphp() {
+    local domain="$1"
+    
+    log_info "⚙️ Updating .env for FrankenPHP"
+    
+    # Update .env file with FrankenPHP settings
+    if [ -f ".env" ]; then
+        # Remove existing Octane settings
+        sed -i '/OCTANE_/d' .env
+        
+        # Add FrankenPHP settings
+        cat >> .env << EOF
+
+# FrankenPHP Settings
+OCTANE_SERVER=frankenphp
+OCTANE_HOST=$domain
+OCTANE_PORT=443
+OCTANE_HTTPS=true
+OCTANE_HTTP_REDIRECT=true
+OCTANE_WORKERS=4
+OCTANE_MAX_REQUESTS=1000
+OCTANE_LOG_LEVEL=info
+EOF
+        
+        # Set proper ownership
+        chown www-data:www-data .env
+        chmod 600 .env
+    fi
+}
+
+setup_tls_storage() {
+    local app_name="$1"
+    
+    log_info "🔐 Setting up TLS storage for $app_name"
+    
+    # Create TLS storage directory
+    local tls_storage_dir="/var/lib/frankenphp/$app_name"
+    mkdir -p "$tls_storage_dir"
+    mkdir -p "$tls_storage_dir/certificates"
+    
+    # Set proper ownership and permissions
+    chown -R www-data:www-data "$tls_storage_dir"
+    chmod 755 "$tls_storage_dir"
+    chmod 700 "$tls_storage_dir/certificates"
+    
+    log_info "✅ TLS storage directory created"
+}
+
+optimize_laravel_app() {
+    log_info "⚡ Optimizing Laravel application..."
+    
+    # Clear all caches first
+    sudo -u www-data php artisan cache:clear
+    sudo -u www-data php artisan config:clear
+    sudo -u www-data php artisan route:clear
+    sudo -u www-data php artisan view:clear
+    
+    # Optimize for production
+    sudo -u www-data php artisan config:cache
+    sudo -u www-data php artisan route:cache
+    sudo -u www-data php artisan view:cache
+    
+    # Optimize Composer autoloader
+    sudo -u www-data composer dump-autoload --optimize
+    
+    log_info "✅ Laravel optimization completed"
+}
+
+setup_production_env() {
+    local domain="$1"
+    
+    log_info "🔧 Setting up production environment"
+    
+    if [ -f ".env" ]; then
+        # Set production values
+        sed -i 's/APP_ENV=.*/APP_ENV=production/' .env
+        sed -i 's/APP_DEBUG=.*/APP_DEBUG=false/' .env
+        sed -i "s/APP_URL=.*/APP_URL=https:\/\/$domain/" .env
+        
+        # Set proper ownership
+        chown www-data:www-data .env
+        chmod 600 .env
+        
+        log_info "✅ Production environment configured"
+    fi
+}
+
 create_octane_service() {
     local app_name="$1"
     local app_dir="$2"
     local domain="$3"
-
-    log_info "⚙️ Creating systemd service for $app_name"
-
-    # Create systemd service file
+    
+    # If called with just app_name, get other parameters from config
+    if [ -z "$app_dir" ]; then
+        app_dir="$APPS_BASE_DIR/$app_name"
+    fi
+    
+    if [ -z "$domain" ]; then
+        if [ -f "/etc/laravel-apps/$app_name.conf" ]; then
+            domain=$(grep "DOMAIN=" "/etc/laravel-apps/$app_name.conf" | cut -d'=' -f2 | tr -d '"')
+        fi
+    fi
+    
+    if [ -z "$domain" ]; then
+        log_error "Domain not specified and not found in config"
+        return 1
+    fi
+    
+    log_info "🔧 Creating systemd service for $app_name"
+    
+    # Create service file
     cat > "/etc/systemd/system/octane-$app_name.service" << EOF
 [Unit]
 Description=Laravel Octane Server for $app_name
@@ -283,26 +548,39 @@ TimeoutStopSec=10
 Restart=always
 RestartSec=10
 
+# Capabilities for binding to privileged ports
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
 # Security settings
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=$app_dir /tmp
+ReadWritePaths=$app_dir /tmp /var/lib/frankenphp/$app_name /var/log/frankenphp
 LimitNOFILE=65536
 
 # Environment
 Environment=APP_ENV=production
 Environment=APP_DEBUG=false
+Environment=XDG_DATA_HOME=/var/lib/frankenphp/$app_name
 
 [Install]
 WantedBy=multi-user.target
 EOF
-
-    # Reload systemd
-    systemctl daemon-reload
-
-    log_info "✅ Service created: octane-$app_name.service"
+    
+    # Set proper ownership
+    chmod 644 "/etc/systemd/system/octane-$app_name.service"
+    
+    # Allow www-data to bind to privileged ports
+    if command -v setcap >/dev/null 2>&1; then
+        # Find actual PHP binary (not symlink)
+        local php_binary=$(readlink -f /usr/bin/php)
+        if [ -f "$php_binary" ]; then
+            setcap 'cap_net_bind_service=+ep' "$php_binary"
+        fi
+    fi
+    
+    log_info "✅ Systemd service created"
 }
 
 # =============================================
@@ -313,41 +591,23 @@ setup_database_config() {
     local app_name="$1"
     local db_name="$2"
 
-    log_info "🗄️ Setting up database for $app_name"
+    log_info "🗄️ Setting up database configuration for $app_name"
 
-    # Generate database credentials
-    local db_user="${app_name}_user"
-    local db_pass=$(generate_password)
+    # Create database if it doesn't exist
+    mysql -u root -e "CREATE DATABASE IF NOT EXISTS $db_name;" 2>/dev/null || true
 
-    # Create database and user
-    mysql -u root -e "
-        CREATE DATABASE IF NOT EXISTS $db_name;
-        CREATE USER IF NOT EXISTS '$db_user'@'localhost' IDENTIFIED BY '$db_pass';
-        GRANT ALL PRIVILEGES ON $db_name.* TO '$db_user'@'localhost';
-        FLUSH PRIVILEGES;
-    "
-
-    # Update .env file with database configuration
+    # Update .env with database settings
     if [ -f ".env" ]; then
         sed -i "s/DB_DATABASE=.*/DB_DATABASE=$db_name/" .env
-        sed -i "s/DB_USERNAME=.*/DB_USERNAME=$db_user/" .env
-        sed -i "s/DB_PASSWORD=.*/DB_PASSWORD=$db_pass/" .env
-        sed -i "s/DB_HOST=.*/DB_HOST=localhost/" .env
-        sed -i "s/DB_PORT=.*/DB_PORT=3306/" .env
+        sed -i "s/DB_USERNAME=.*/DB_USERNAME=root/" .env
+        sed -i "s/DB_PASSWORD=.*/DB_PASSWORD=/" .env
+        
+        # Set proper ownership
+        chown www-data:www-data .env
+        chmod 600 .env
     fi
 
-    # Save config for later use
-    cat > "/etc/laravel-apps/$app_name.conf" << EOF
-APP_NAME=$app_name
-APP_DIR=$app_dir
-DOMAIN=$domain
-DB_NAME=$db_name
-DB_USER=$db_user
-DB_PASS=$db_pass
-CREATED_AT="$(date '+%Y-%m-%d %H:%M:%S')"
-EOF
-
-    log_info "✅ Database configured: $db_name"
+    log_info "✅ Database configuration completed"
 }
 
 # =============================================
@@ -681,7 +941,26 @@ status_app() {
 
     # Check if service exists
     if systemctl list-units --full -all | grep -q "octane-$app_name.service"; then
-        systemctl status "octane-$app_name.service" --no-pager
+        # Get service status without failing the script
+        local service_status
+        service_status=$(systemctl is-active "octane-$app_name.service" 2>/dev/null)
+        
+        echo "🔍 Service Status: $service_status"
+        
+        # Show detailed status
+        systemctl status "octane-$app_name.service" --no-pager || true
+        
+        # If service is failing, show recent logs
+        if [ "$service_status" = "failed" ] || [ "$service_status" = "activating" ]; then
+            log_info "📋 Recent logs:"
+            journalctl -u "octane-$app_name.service" -n 10 --no-pager || true
+            
+            # Check for common issues
+            log_info "🔍 Checking for common issues..."
+            check_service_issues "$app_name"
+        fi
+        
+        return 0
     else
         log_error "Service not found: octane-$app_name.service"
         return 1
@@ -689,16 +968,352 @@ status_app() {
 }
 
 # =============================================
-# Utility Functions
+# Service Issue Detection and Fixing
 # =============================================
 
-generate_password() {
-    openssl rand -base64 32 | tr -d "=+/" | cut -c1-25
+check_service_issues() {
+    local app_name="$1"
+    local app_dir="$APPS_BASE_DIR/$app_name"
+    
+    # Check for permission issues
+    if journalctl -u "octane-$app_name.service" -n 50 --no-pager | grep -q "permission denied"; then
+        log_error "🚫 Permission denied issue detected!"
+        log_info "💡 Possible solutions:"
+        log_info "   1. Run: sudo ./install.sh fix:permissions $app_name"
+        log_info "   2. Use non-privileged ports (8000, 8080, etc.)"
+        log_info "   3. Setup proper capabilities for binding to ports < 1024"
+    fi
+    
+    # Check for port binding issues
+    if journalctl -u "octane-$app_name.service" -n 50 --no-pager | grep -q "bind: permission denied"; then
+        log_error "🚫 Port binding issue detected!"
+        log_info "💡 The service is trying to bind to privileged ports (80/443) with user www-data"
+        log_info "   Solutions:"
+        log_info "   1. Use sudo ./install.sh fix:ports $app_name"
+        log_info "   2. Configure reverse proxy (nginx/apache)"
+        log_info "   3. Use systemd socket activation"
+    fi
+    
+    # Check for TLS storage issues
+    if journalctl -u "octane-$app_name.service" -n 50 --no-pager | grep -q "read-only file system"; then
+        log_error "🚫 TLS storage issue detected!"
+        log_info "💡 Run: sudo ./install.sh fix:tls-storage $app_name"
+    fi
+    
+    # Check if app directory exists
+    if [ ! -d "$app_dir" ]; then
+        log_error "🚫 App directory not found: $app_dir"
+        return 1
+    fi
+    
+    # Check if Laravel app is properly configured
+    if [ ! -f "$app_dir/.env" ]; then
+        log_error "🚫 .env file not found in $app_dir"
+        log_info "💡 Run: sudo ./install.sh fix:env $app_name"
+    fi
 }
 
 # =============================================
-# Octane Detection & Configuration Helpers
+# Fix Functions
 # =============================================
+
+fix_permissions() {
+    local app_name="$1"
+    local app_dir="$APPS_BASE_DIR/$app_name"
+    
+    log_info "🔧 Fixing permissions for $app_name..."
+    
+    # Create necessary directories
+    mkdir -p /var/lib/caddy
+    mkdir -p /var/log/frankenphp
+    
+    # Set proper ownership
+    chown -R www-data:www-data "$app_dir"
+    chown -R www-data:www-data /var/lib/caddy
+    chown -R www-data:www-data /var/log/frankenphp
+    
+    # Set proper permissions
+    chmod -R 755 "$app_dir"
+    chmod -R 755 /var/lib/caddy
+    chmod -R 755 /var/log/frankenphp
+    
+    # Fix storage permissions
+    if [ -d "$app_dir/storage" ]; then
+        chmod -R 775 "$app_dir/storage"
+    fi
+    
+    # Fix bootstrap/cache permissions
+    if [ -d "$app_dir/bootstrap/cache" ]; then
+        chmod -R 775 "$app_dir/bootstrap/cache"
+    fi
+    
+    log_info "✅ Permissions fixed"
+}
+
+fix_ports() {
+    local app_name="$1"
+    local app_dir="$APPS_BASE_DIR/$app_name"
+    local service_file="/etc/systemd/system/octane-$app_name.service"
+    
+    log_info "🔧 Fixing port binding issues for $app_name..."
+    
+    # Option 1: Use capabilities to allow binding to privileged ports
+    if command -v setcap >/dev/null 2>&1; then
+        log_info "🔧 Setting capabilities for PHP binary..."
+        setcap 'cap_net_bind_service=+ep' /usr/bin/php
+        
+        # Also set for FrankenPHP binary if it exists
+        if [ -f "/usr/local/bin/frankenphp" ]; then
+            setcap 'cap_net_bind_service=+ep' /usr/local/bin/frankenphp
+        fi
+    fi
+    
+    # Option 2: Update systemd service to use non-privileged ports with reverse proxy
+    log_info "🔧 Creating reverse proxy configuration..."
+    create_reverse_proxy_config "$app_name"
+    
+    # Update service to use non-privileged ports
+    log_info "🔧 Updating service to use port 8000..."
+    update_service_ports "$app_name" "8000"
+    
+    systemctl daemon-reload
+    systemctl restart "octane-$app_name.service"
+    
+    log_info "✅ Port configuration fixed"
+}
+
+fix_tls_storage() {
+    local app_name="$1"
+    
+    log_info "🔧 Fixing TLS storage issues for $app_name..."
+    
+    # Create proper TLS storage directories
+    mkdir -p /var/lib/caddy/.local/share/caddy
+    mkdir -p /var/lib/caddy/.local/share/caddy/locks
+    
+    # Set proper ownership
+    chown -R www-data:www-data /var/lib/caddy
+    
+    # Set proper permissions
+    chmod -R 755 /var/lib/caddy
+    
+    # Update service to use proper data directory
+    local service_file="/etc/systemd/system/octane-$app_name.service"
+    if [ -f "$service_file" ]; then
+        # Add environment variable for Caddy data directory
+        if ! grep -q "Environment=XDG_DATA_HOME" "$service_file"; then
+            sed -i '/Environment=APP_DEBUG=false/a Environment=XDG_DATA_HOME=/var/lib/caddy/.local/share' "$service_file"
+        fi
+        
+        # Update ReadWritePaths
+        sed -i 's|ReadWritePaths=/opt/laravel-apps/.*|ReadWritePaths=/opt/laravel-apps/'$app_name' /tmp /var/lib/caddy|' "$service_file"
+    fi
+    
+    systemctl daemon-reload
+    systemctl restart "octane-$app_name.service"
+    
+    log_info "✅ TLS storage fixed"
+}
+
+create_reverse_proxy_config() {
+    local app_name="$1"
+    local domain=$(grep "host=" "/etc/systemd/system/octane-$app_name.service" | sed 's/.*--host=\([^ ]*\).*/\1/')
+    
+    # Create nginx configuration
+    cat > "/etc/nginx/sites-available/$app_name" << EOF
+server {
+    listen 80;
+    server_name $domain;
+    
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+
+server {
+    listen 443 ssl;
+    server_name $domain;
+    
+    ssl_certificate /etc/letsencrypt/live/$domain/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$domain/privkey.pem;
+    
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+    
+    # Enable the site
+    ln -sf "/etc/nginx/sites-available/$app_name" "/etc/nginx/sites-enabled/$app_name"
+    
+    # Test nginx configuration
+    if nginx -t; then
+        systemctl reload nginx
+        log_info "✅ Nginx reverse proxy configured"
+    else
+        log_error "❌ Nginx configuration test failed"
+    fi
+}
+
+update_service_ports() {
+    local app_name="$1"
+    local port="$2"
+    local service_file="/etc/systemd/system/octane-$app_name.service"
+    
+    if [ -f "$service_file" ]; then
+        # Update the ExecStart line to use the new port
+        sed -i "s|--port=[0-9]*|--port=$port|" "$service_file"
+        # Remove --https flag since we're using reverse proxy
+        sed -i "s|--https ||" "$service_file"
+        # Remove --http-redirect flag
+        sed -i "s|--http-redirect ||" "$service_file"
+        
+        log_info "✅ Service updated to use port $port"
+    fi
+}
+
+fix_env() {
+    local app_name="$1"
+    local app_dir="$APPS_BASE_DIR/$app_name"
+    
+    log_info "🔧 Fixing .env configuration for $app_name..."
+    
+    cd "$app_dir"
+    
+    # Copy .env.example if .env doesn't exist
+    if [ ! -f ".env" ] && [ -f ".env.example" ]; then
+        cp ".env.example" ".env"
+    fi
+    
+    # Generate app key if not set
+    if [ -f ".env" ]; then
+        if ! grep -q "APP_KEY=" ".env" || grep -q "APP_KEY=$" ".env"; then
+            php artisan key:generate --force
+        fi
+    fi
+    
+    # Set proper permissions
+    chown www-data:www-data ".env"
+    chmod 600 ".env"
+    
+    log_info "✅ .env configuration fixed"
+}
+
+# =============================================
+# Comprehensive Fix Function
+# =============================================
+
+fix_app_issues() {
+    local app_name="$1"
+    
+    if [ -z "$app_name" ]; then
+        log_error "Usage: fix_app_issues <app-name>"
+        return 1
+    fi
+    
+    log_info "🔧 Comprehensive fix for app: $app_name"
+    
+    # Stop the service first
+    systemctl stop "octane-$app_name.service" || true
+    
+    # Run all fixes
+    fix_permissions "$app_name"
+    fix_tls_storage "$app_name"
+    fix_ports "$app_name"
+    fix_env "$app_name"
+    
+    # Start the service
+    systemctl start "octane-$app_name.service"
+    
+    log_info "✅ Comprehensive fix completed for $app_name"
+    log_info "🔍 Check status: ./install.sh status $app_name"
+}
+
+# =============================================
+# Setup Commands for Existing Apps
+# =============================================
+
+setup_octane_for_existing_app() {
+    local app_name="$1"
+    
+    if [ -z "$app_name" ]; then
+        log_error "Usage: octane:setup <app-name>"
+        return 1
+    fi
+    
+    local app_dir="$APPS_BASE_DIR/$app_name"
+    
+    if [ ! -d "$app_dir" ]; then
+        log_error "App directory not found: $app_dir"
+        return 1
+    fi
+    
+    log_info "🔧 Setting up Octane for existing app: $app_name"
+    
+    # Get domain from config
+    local domain=""
+    if [ -f "/etc/laravel-apps/$app_name.conf" ]; then
+        domain=$(grep "DOMAIN=" "/etc/laravel-apps/$app_name.conf" | cut -d'=' -f2 | tr -d '"')
+    fi
+    
+    if [ -z "$domain" ]; then
+        log_error "Domain not found in config. Please provide domain:"
+        read -p "Domain: " domain
+    fi
+    
+    # Setup Octane
+    cd "$app_dir"
+    install_octane "$app_name" "$app_dir" "$domain"
+    
+    log_info "✅ Octane setup completed for $app_name"
+}
+
+configure_octane_settings() {
+    local app_name="$1"
+    
+    if [ -z "$app_name" ]; then
+        log_error "Usage: octane:config <app-name>"
+        return 1
+    fi
+    
+    local app_dir="$APPS_BASE_DIR/$app_name"
+    
+    if [ ! -d "$app_dir" ]; then
+        log_error "App directory not found: $app_dir"
+        return 1
+    fi
+    
+    log_info "⚙️ Configuring Octane settings for: $app_name"
+    
+    # Get domain from config
+    local domain=""
+    if [ -f "/etc/laravel-apps/$app_name.conf" ]; then
+        domain=$(grep "DOMAIN=" "/etc/laravel-apps/$app_name.conf" | cut -d'=' -f2 | tr -d '"')
+    fi
+    
+    if [ -z "$domain" ]; then
+        log_error "Domain not found in config"
+        return 1
+    fi
+    
+    cd "$app_dir"
+    
+    # Setup FrankenPHP configuration
+    setup_frankenphp_config "$app_name" "$domain"
+    
+    # Setup TLS storage
+    setup_tls_storage "$app_name"
+    
+    log_info "✅ Octane configuration completed for $app_name"
+}
 
 check_octane_installed() {
     # Check if Octane is in composer.json
@@ -711,7 +1326,7 @@ check_octane_installed() {
                 log_info "✅ Octane package is installed"
 
                 # Check if artisan octane commands are available
-                if php artisan list | grep -q "octane:"; then
+                if sudo -u www-data php artisan list | grep -q "octane:"; then
                     log_info "✅ Octane commands are available"
                     return 0
                 else
@@ -750,755 +1365,6 @@ check_frankenphp_configured() {
     fi
 }
 
-configure_frankenphp() {
-    # Configure Laravel Octane to use FrankenPHP following best practices
-    log_info "🔧 Configuring Laravel Octane to use FrankenPHP..."
-
-    # Check if Octane is installed first
-    if ! php artisan list | grep -q "octane:start"; then
-        log_info "📦 Installing Laravel Octane first..."
-        if ! composer require laravel/octane; then
-            log_error "Failed to install Laravel Octane"
-            return 1
-        fi
-    fi
-
-    # Configure FrankenPHP (Laravel will handle binary download)
-    if php artisan octane:install --server=frankenphp; then
-        log_info "✅ FrankenPHP configured successfully"
-        return 0
-    else
-        log_error "Failed to configure FrankenPHP"
-        return 1
-    fi
-}
-
-setup_production_env() {
-    local domain="$1"
-
-    log_info "⚙️ Setting up production environment..."
-
-    # Update .env for production
-    if [ -f ".env" ]; then
-        sed -i "s/APP_ENV=.*/APP_ENV=production/" .env
-        sed -i "s/APP_DEBUG=.*/APP_DEBUG=false/" .env
-        sed -i "s|APP_URL=.*|APP_URL=https://$domain|" .env
-
-        # Add Octane-specific settings if not present
-        if ! grep -q "OCTANE_SERVER=" .env; then
-            echo "OCTANE_SERVER=frankenphp" >> .env
-        else
-            sed -i "s/OCTANE_SERVER=.*/OCTANE_SERVER=frankenphp/" .env
-        fi
-
-        log_info "✅ Production environment configured"
-    else
-        log_error ".env file not found"
-        return 1
-    fi
-}
-
-optimize_laravel_app() {
-    log_info "⚡ Optimizing Laravel app for production..."
-
-    # Clear existing caches first
-    php artisan config:clear || true
-    php artisan route:clear || true
-    php artisan view:clear || true
-    php artisan cache:clear || true
-
-    # Optimize for production
-    php artisan config:cache
-    php artisan route:cache
-    php artisan view:cache
-
-    # Additional optimizations
-    if command -v composer &> /dev/null; then
-        composer dump-autoload --optimize
-    fi
-
-    log_info "✅ Laravel app optimized"
-}
-
 # =============================================
-# Octane Status & Debugging Functions
+# Installation Helper Functions
 # =============================================
-
-show_octane_status() {
-    local app_name="$1"
-    local app_dir="$2"
-
-    if [ -z "$app_name" ] || [ -z "$app_dir" ]; then
-        log_error "Usage: show_octane_status <app-name> <app-dir>"
-        return 1
-    fi
-
-    log_info "📊 Octane Status for $app_name"
-    log_info "================================"
-
-    cd "$app_dir"
-
-    # Check Laravel project
-    if [ -f "artisan" ]; then
-        log_info "✅ Laravel project: YES"
-    else
-        log_info "❌ Laravel project: NO"
-        return 1
-    fi
-
-    # Check Octane in composer.json
-    if [ -f "composer.json" ]; then
-        if grep -q '"laravel/octane"' composer.json; then
-            local octane_version=$(grep '"laravel/octane"' composer.json | sed 's/.*"laravel\/octane":[^"]*"\([^"]*\)".*/\1/')
-            log_info "✅ Octane in composer.json: $octane_version"
-        else
-            log_info "❌ Octane in composer.json: NO"
-        fi
-    fi
-
-    # Check Octane installation
-    if [ -d "vendor/laravel/octane" ]; then
-        log_info "✅ Octane package installed: YES"
-    else
-        log_info "❌ Octane package installed: NO"
-    fi
-
-    # Check Octane commands
-    if php artisan list | grep -q "octane:"; then
-        log_info "✅ Octane commands available: YES"
-        php artisan list | grep "octane:" | while read line; do
-            log_info "   $line"
-        done
-    else
-        log_info "❌ Octane commands available: NO"
-    fi
-
-    # Check Octane config
-    if [ -f "config/octane.php" ]; then
-        log_info "✅ Octane config file: YES"
-
-        # Check server configuration
-        if grep -q "frankenphp" config/octane.php; then
-            log_info "✅ FrankenPHP configured: YES"
-        else
-            log_info "❌ FrankenPHP configured: NO"
-        fi
-    else
-        log_info "❌ Octane config file: NO"
-    fi
-
-    # Check .env settings
-    if [ -f ".env" ]; then
-        log_info "✅ Environment file: YES"
-
-        local octane_server=$(grep "OCTANE_SERVER=" .env | cut -d'=' -f2)
-        if [ -n "$octane_server" ]; then
-            log_info "✅ OCTANE_SERVER: $octane_server"
-        else
-            log_info "⚠️  OCTANE_SERVER: NOT SET"
-        fi
-    else
-        log_info "❌ Environment file: NO"
-    fi
-
-    # Check FrankenPHP configuration
-    if check_frankenphp_binary; then
-        log_info "✅ FrankenPHP configuration: YES"
-
-        # Check if Laravel Octane can detect FrankenPHP
-        if timeout 5 php artisan octane:status --server=frankenphp &>/dev/null; then
-            log_info "   Laravel Octane can detect FrankenPHP"
-        else
-            log_info "   Laravel Octane status check available"
-        fi
-    else
-        log_info "❌ FrankenPHP configuration: NO"
-        log_info "   (FrankenPHP not configured in Laravel Octane)"
-    fi
-
-    # Check service status
-    local service_name="octane-$app_name.service"
-    if systemctl is-active --quiet "$service_name"; then
-        log_info "✅ Service status: ACTIVE"
-    else
-        log_info "❌ Service status: INACTIVE"
-    fi
-
-    log_info "================================"
-}
-
-# Function to handle different Octane scenarios
-handle_octane_scenario() {
-    local app_dir="$1"
-    local scenario=""
-
-    cd "$app_dir"
-
-    # Detect scenario
-    if [ -f "composer.json" ] && grep -q '"laravel/octane"' composer.json; then
-        if [ -d "vendor/laravel/octane" ]; then
-            if [ -f "config/octane.php" ]; then
-                if grep -q "frankenphp" config/octane.php; then
-                    scenario="FULLY_CONFIGURED"
-                else
-                    scenario="OCTANE_INSTALLED_DIFFERENT_SERVER"
-                fi
-            else
-                scenario="OCTANE_INSTALLED_NO_CONFIG"
-            fi
-        else
-            scenario="OCTANE_IN_COMPOSER_NOT_INSTALLED"
-        fi
-    else
-        scenario="NO_OCTANE"
-    fi
-
-    log_info "🔍 Detected scenario: $scenario"
-
-    case "$scenario" in
-        "FULLY_CONFIGURED")
-            log_info "✅ Octane with FrankenPHP already configured"
-            # Still check if binary exists via Laravel Octane
-            if ! check_frankenphp_binary; then
-                log_info "📥 FrankenPHP binary missing, installing via Laravel Octane..."
-                if ! php artisan octane:install --server=frankenphp; then
-                    log_error "Failed to install FrankenPHP via Laravel Octane"
-                    return 1
-                fi
-            fi
-            return 0
-            ;;
-        "OCTANE_INSTALLED_DIFFERENT_SERVER")
-            log_info "🔧 Octane installed but using different server, reconfiguring..."
-            configure_frankenphp
-            return $?
-            ;;
-        "OCTANE_INSTALLED_NO_CONFIG")
-            log_info "🔧 Octane installed but not configured, configuring..."
-            configure_frankenphp
-            return $?
-            ;;
-        "OCTANE_IN_COMPOSER_NOT_INSTALLED")
-            log_info "📦 Octane in composer.json but not installed, installing..."
-            composer install
-            configure_frankenphp
-            return $?
-            ;;
-        "NO_OCTANE")
-            log_info "📦 No Octane found, installing fresh..."
-
-            # Install Octane
-            if ! composer require laravel/octane; then
-                log_error "Failed to install Laravel Octane"
-                return 1
-            fi
-
-            # Configure with FrankenPHP (this will download the binary automatically)
-            if ! php artisan octane:install --server=frankenphp; then
-                log_error "Failed to configure Octane with FrankenPHP"
-                return 1
-            fi
-
-            return 0
-            ;;
-        *)
-            log_error "Unknown scenario: $scenario"
-            return 1
-            ;;
-    esac
-}
-
-# Smart Octane installation with scenario detection
-install_octane_smart() {
-    local app_name="$1"
-    local app_dir="$2"
-    local domain="$3"
-
-    cd "$app_dir"
-
-    log_info "🧠 Smart Octane Setup for $app_name"
-    log_info "==================================="
-
-    # Show current status
-    show_octane_status "$app_name" "$app_dir"
-
-    # Handle the scenario
-    if handle_octane_scenario "$app_dir"; then
-        log_info "✅ Octane setup completed successfully"
-    else
-        log_error "❌ Failed to setup Octane"
-        return 1
-    fi
-
-    # Always update production environment
-    setup_production_env "$domain"
-
-    # Always optimize
-    optimize_laravel_app
-
-    # Final status check
-    log_info ""
-    log_info "📊 Final Status Check:"
-    show_octane_status "$app_name" "$app_dir"
-
-    log_info "✅ Smart Octane setup completed for $app_name"
-}
-
-# Command line interface functions for Octane management
-octane_check_status() {
-    local app_name="$1"
-
-    if [ -z "$app_name" ]; then
-        log_error "Usage: octane:check <app-name>"
-        return 1
-    fi
-
-    # Validate app exists
-    if ! validate_app_exists "$app_name"; then
-        log_error "App $app_name does not exist"
-        return 1
-    fi
-
-    local app_dir="$APPS_BASE_DIR/$app_name"
-    show_octane_status "$app_name" "$app_dir"
-}
-
-octane_analyze_setup() {
-    local app_name="$1"
-
-    if [ -z "$app_name" ]; then
-        log_error "Usage: octane:analyze <app-name>"
-        return 1
-    fi
-
-    # Validate app exists
-    if ! validate_app_exists "$app_name"; then
-        log_error "App $app_name does not exist"
-        return 1
-    fi
-
-    local app_dir="$APPS_BASE_DIR/$app_name"
-
-    log_info "🔍 Analyzing Octane setup for $app_name"
-    show_octane_status "$app_name" "$app_dir"
-
-    # Show recommendations
-    cd "$app_dir"
-    log_info ""
-    log_info "💡 Recommendations:"
-
-    if ! check_octane_installed; then
-        log_info "   • Install Octane: ./install.sh octane:install $app_dir"
-    fi
-
-    if ! check_frankenphp_configured; then
-        log_info "   • Configure FrankenPHP: php artisan octane:install --server=frankenphp"
-    fi
-
-    # Check service status
-    local service_name="octane-$app_name.service"
-    if ! systemctl is-active --quiet "$service_name"; then
-        log_info "   • Start service: systemctl start $service_name"
-    fi
-}
-
-octane_fix_setup() {
-    local app_name="$1"
-
-    if [ -z "$app_name" ]; then
-        log_error "Usage: octane:fix <app-name>"
-        return 1
-    fi
-
-    # Validate app exists
-    if ! validate_app_exists "$app_name"; then
-        log_error "App $app_name does not exist"
-        return 1
-    fi
-
-    local app_dir="$APPS_BASE_DIR/$app_name"
-
-    log_info "🔧 Fixing Octane setup for $app_name"
-
-    # Run smart installation
-    install_octane_smart "$app_name" "$app_dir" "$(get_app_domain "$app_name")"
-
-    # Restart service
-    systemctl restart "octane-$app_name.service"
-
-    log_info "✅ Octane setup fixed for $app_name"
-}
-
-# Helper function to get app domain
-get_app_domain() {
-    local app_name="$1"
-    local app_config="$CONFIG_DIR/$app_name.conf"
-
-    if [ -f "$app_config" ]; then
-        source "$app_config"
-        echo "$DOMAIN"
-    else
-        echo "$app_name.local"
-    fi
-}
-
-# =============================================
-# End of Enhanced Octane Management
-# =============================================
-
-# =============================================
-# FrankenPHP Binary Management
-# =============================================
-
-download_frankenphp_binary() {
-    local current_dir="$(pwd)"
-    local frankenphp_binary="frankenphp"
-
-    log_info "📥 Checking FrankenPHP binary..."
-
-    # Check if FrankenPHP binary already exists
-    if [ -f "$frankenphp_binary" ]; then
-        log_info "✅ FrankenPHP binary already exists"
-
-        # Check if it's executable
-        if [ -x "$frankenphp_binary" ]; then
-            log_info "✅ FrankenPHP binary is executable"
-            return 0
-        else
-            log_info "🔧 Making FrankenPHP binary executable..."
-            chmod +x "$frankenphp_binary"
-            return 0
-        fi
-    fi
-
-    # Download FrankenPHP binary
-    log_info "📥 Downloading FrankenPHP binary..."
-
-    # Detect architecture
-    local arch=$(uname -m)
-    local os=$(uname -s | tr '[:upper:]' '[:lower:]')
-    local frankenphp_url=""
-
-    case "$arch" in
-        "x86_64")
-            arch="x86_64"
-            ;;
-        "aarch64"|"arm64")
-            arch="aarch64"
-            ;;
-        *)
-            log_error "Unsupported architecture: $arch"
-            return 1
-            ;;
-    esac
-
-    case "$os" in
-        "linux")
-            frankenphp_url="https://github.com/dunglas/frankenphp/releases/latest/download/frankenphp-linux-$arch"
-            ;;
-        "darwin")
-            frankenphp_url="https://github.com/dunglas/frankenphp/releases/latest/download/frankenphp-mac-$arch"
-            ;;
-        *)
-            log_error "Unsupported operating system: $os"
-            return 1
-            ;;
-    esac
-
-    log_info "📥 Downloading from: $frankenphp_url"
-
-    # Download with retry logic
-    local retry_count=0
-    local max_retries=3
-
-    while [ $retry_count -lt $max_retries ]; do
-        if curl -fsSL "$frankenphp_url" -o "$frankenphp_binary.tmp"; then
-            # Move temporary file to final location
-            mv "$frankenphp_binary.tmp" "$frankenphp_binary"
-            chmod +x "$frankenphp_binary"
-
-            log_info "✅ FrankenPHP binary downloaded successfully"
-
-            # Verify the binary works
-            if ./"$frankenphp_binary" version &>/dev/null; then
-                log_info "✅ FrankenPHP binary is working"
-                return 0
-            else
-                log_error "⚠️  FrankenPHP binary downloaded but not working properly"
-                return 1
-            fi
-        else
-            retry_count=$((retry_count + 1))
-            log_error "❌ Failed to download FrankenPHP binary (attempt $retry_count/$max_retries)"
-
-            if [ $retry_count -lt $max_retries ]; then
-                log_info "🔄 Retrying in 5 seconds..."
-                sleep 5
-            fi
-        fi
-    done
-
-    log_error "❌ Failed to download FrankenPHP binary after $max_retries attempts"
-    return 1
-}
-
-check_frankenphp_binary() {
-    # Check if FrankenPHP is properly configured in Laravel Octane
-    # This follows Laravel best practices instead of manual binary checking
-
-    # Check if octane config exists and has frankenphp configured
-    if [ -f "config/octane.php" ]; then
-        if grep -q "frankenphp" config/octane.php; then
-            return 0
-        fi
-    fi
-
-    # Check if .env has OCTANE_SERVER set to frankenphp
-    if [ -f ".env" ]; then
-        if grep -q "OCTANE_SERVER=frankenphp" .env; then
-            return 0
-        fi
-    fi
-
-    # Check if Laravel Octane can find FrankenPHP
-    if timeout 5 php artisan octane:status --server=frankenphp &>/dev/null; then
-        return 0
-    fi
-
-    return 1
-}
-
-# =============================================
-# Enhanced Octane Detection & Configuration
-# =============================================
-
-# =============================================
-# Config File Management
-# =============================================
-
-fix_config_files() {
-    local app_name="$1"
-
-    if [ -z "$app_name" ]; then
-        log_error "Usage: fix_config_files <app-name>"
-        return 1
-    fi
-
-    local config_file="/etc/laravel-apps/$app_name.conf"
-
-    if [ ! -f "$config_file" ]; then
-        log_error "Config file not found: $config_file"
-        return 1
-    fi
-
-    log_info "🔧 Fixing configuration file for $app_name"
-
-    # Create backup
-    cp "$config_file" "$config_file.backup.$(date +%Y%m%d_%H%M%S)"
-
-    # Fix the CREATED_AT line by adding quotes
-    sed -i 's/^CREATED_AT=\(.*\)$/CREATED_AT="\1"/' "$config_file"
-
-    # Test if the config file can be sourced now
-    if bash -n "$config_file" 2>/dev/null; then
-        log_info "✅ Configuration file fixed successfully"
-
-        # Test sourcing
-        if source "$config_file" 2>/dev/null; then
-            log_info "✅ Configuration file can be sourced properly"
-        else
-            log_warning "⚠️  Configuration file syntax is valid but has sourcing issues"
-        fi
-    else
-        log_error "❌ Configuration file still has syntax errors"
-        return 1
-    fi
-}
-
-fix_all_config_files() {
-    log_info "🔧 Fixing all configuration files..."
-
-    local config_dir="/etc/laravel-apps"
-    local fixed_count=0
-    local error_count=0
-
-    if [ ! -d "$config_dir" ]; then
-        log_error "Config directory not found: $config_dir"
-        return 1
-    fi
-
-    for config_file in "$config_dir"/*.conf; do
-        if [ -f "$config_file" ]; then
-            local app_name=$(basename "$config_file" .conf)
-            log_info "🔧 Processing: $app_name"
-
-            if fix_config_files "$app_name"; then
-                fixed_count=$((fixed_count + 1))
-            else
-                error_count=$((error_count + 1))
-            fi
-        fi
-    done
-
-    log_info "✅ Fixed $fixed_count configuration files"
-    if [ $error_count -gt 0 ]; then
-        log_warning "⚠️  $error_count configuration files had errors"
-    fi
-}
-
-# =============================================
-# Common Issue Fixes
-# =============================================
-
-fix_common_issues() {
-    local app_name="$1"
-
-    if [ -z "$app_name" ]; then
-        log_error "Usage: fix_common_issues <app-name>"
-        return 1
-    fi
-
-    log_info "🔧 Running common fixes for $app_name"
-
-    # Fix 1: Config file syntax
-    log_info "🔧 Step 1: Fixing configuration file..."
-    if fix_config_files "$app_name"; then
-        log_info "✅ Configuration file fixed"
-    else
-        log_warning "⚠️  Configuration file issues persist"
-    fi
-
-    # Fix 2: Check app directory and permissions
-    log_info "🔧 Step 2: Checking app directory and permissions..."
-    local app_dir="/opt/laravel-apps/$app_name"
-    if [ -d "$app_dir" ]; then
-        log_info "✅ App directory exists: $app_dir"
-
-        # Fix permissions
-        chown -R www-data:www-data "$app_dir"
-        chmod -R 755 "$app_dir"
-        chmod -R 775 "$app_dir/storage"
-        chmod -R 775 "$app_dir/bootstrap/cache"
-
-        log_info "✅ Permissions fixed"
-    else
-        log_error "❌ App directory not found: $app_dir"
-        return 1
-    fi
-
-    # Fix 3: Database connection
-    log_info "🔧 Step 3: Fixing database connection..."
-    if fix_app_database "$app_name"; then
-        log_info "✅ Database connection fixed"
-    else
-        log_warning "⚠️  Database connection issues persist"
-    fi
-
-    # Fix 4: Laravel optimizations
-    log_info "🔧 Step 4: Running Laravel optimizations..."
-    cd "$app_dir"
-
-    # Clear caches
-    php artisan cache:clear 2>/dev/null || true
-    php artisan config:clear 2>/dev/null || true
-    php artisan route:clear 2>/dev/null || true
-    php artisan view:clear 2>/dev/null || true
-
-    # Optimize for production
-    php artisan config:cache 2>/dev/null || true
-    php artisan route:cache 2>/dev/null || true
-    php artisan view:cache 2>/dev/null || true
-
-    log_info "✅ Laravel optimizations completed"
-
-    # Fix 5: Systemd service
-    log_info "🔧 Step 5: Fixing systemd service..."
-    if systemd_fix_service "$app_name"; then
-        log_info "✅ Systemd service fixed"
-    else
-        log_warning "⚠️  Systemd service issues persist"
-    fi
-
-    log_info "✅ Common fixes completed for $app_name"
-}
-
-fix_app_issues() {
-    local app_name="$1"
-
-    if [ -z "$app_name" ]; then
-        log_error "Usage: fix_app_issues <app-name>"
-        return 1
-    fi
-
-    log_info "🔧 Running comprehensive app fixes for $app_name"
-
-    # Load required modules
-    load_module "database"
-    load_module "systemd"
-
-    # Run common fixes first
-    fix_common_issues "$app_name"
-
-    # Additional specific fixes
-    local app_dir="/opt/laravel-apps/$app_name"
-    cd "$app_dir"
-
-    # Fix 6: Octane configuration
-    log_info "🔧 Step 6: Checking Octane configuration..."
-    if ! php artisan list | grep -q "octane:start"; then
-        log_info "📦 Installing Laravel Octane..."
-        composer require laravel/octane
-    fi
-
-    # Configure FrankenPHP
-    if ! is_frankenphp_configured; then
-        log_info "🔧 Configuring FrankenPHP..."
-        php artisan octane:install --server=frankenphp
-    fi
-
-    # Fix 7: Environment variables
-    log_info "🔧 Step 7: Checking environment variables..."
-    if [ -f ".env" ]; then
-        # Ensure OCTANE_SERVER is set
-        if ! grep -q "OCTANE_SERVER=" .env; then
-            echo "OCTANE_SERVER=frankenphp" >> .env
-        else
-            sed -i 's/OCTANE_SERVER=.*/OCTANE_SERVER=frankenphp/' .env
-        fi
-
-        # Ensure APP_ENV is set correctly
-        if ! grep -q "APP_ENV=" .env; then
-            echo "APP_ENV=production" >> .env
-        fi
-
-        log_info "✅ Environment variables checked"
-    fi
-
-    # Fix 8: Run migrations
-    log_info "🔧 Step 8: Running database migrations..."
-    if php artisan migrate --force 2>/dev/null; then
-        log_info "✅ Database migrations completed"
-    else
-        log_warning "⚠️  Database migrations failed"
-    fi
-
-    log_info "✅ All app fixes completed for $app_name"
-}
-
-is_frankenphp_configured() {
-    # Check if FrankenPHP is properly configured in Laravel Octane
-    if [ -f "config/octane.php" ]; then
-        if grep -q "frankenphp" config/octane.php; then
-            return 0
-        fi
-    fi
-
-    # Check if .env has OCTANE_SERVER set to frankenphp
-    if [ -f ".env" ]; then
-        if grep -q "OCTANE_SERVER=frankenphp" .env; then
-            return 0
-        fi
-    fi
-
-    return 1
-}

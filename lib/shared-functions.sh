@@ -758,6 +758,20 @@ handle_error() {
 }
 
 # =============================================
+# Error Handling Setup
+# =============================================
+
+setup_error_handling() {
+    # Set up error handling
+    set -euo pipefail
+    
+    # Trap errors
+    trap 'handle_error "An error occurred on line $LINENO. Exit code: $?" $ERROR_UNKNOWN' ERR
+    
+    log_info "🔧 Error handling initialized"
+}
+
+# =============================================
 # Initialization
 # =============================================
 
