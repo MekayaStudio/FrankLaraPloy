@@ -8,6 +8,7 @@ Sistem deployment multi-aplikasi Laravel yang menggunakan FrankenPHP dengan duku
 - **Embedded PHP Server**: Tidak memerlukan PHP-FPM
 - **Built-in Caddy Web Server**: Reverse proxy otomatis
 - **Auto HTTPS**: Let's Encrypt terintegrasi
+- **🌐 HTTP/HTTPS Dual Mode**: Support HTTP dan HTTPS tanpa redirect
 - **Worker Optimization**: Kalkulasi thread optimal berdasarkan CPU/Memory
 - **Apache/Nginx Removal**: Otomatis menghapus Apache/Nginx untuk mencegah konflik
 - **Indonesia Mirror**: Menggunakan mirror server Indonesia untuk download lebih cepat
@@ -109,6 +110,11 @@ sudo ./install.sh quick web_sam example.com https://github.com/user/repo.git
 
 # Optimize for production
 ./install.sh octane:optimize
+
+# 🌐 Dual Mode (HTTP/HTTPS tanpa redirect)
+./install.sh octane:dual web_sam dual
+./install.sh octane:start-dual web_sam dual
+./install.sh octane:status-dual web_sam dual
 ```
 
 ### 3. Manajemen Aplikasi
@@ -157,6 +163,30 @@ sudo ./install.sh quick web_sam example.com https://github.com/user/repo.git
 # Backup semua apps
 ./install.sh backup
 ```
+
+### 6. 🌐 HTTP/HTTPS Dual Mode
+
+```bash
+# Konfigurasi dual mode (HTTP + HTTPS tanpa redirect)
+./install.sh octane:dual web_sam dual
+
+# Manajemen dual mode services
+./install.sh octane:start-dual web_sam dual
+./install.sh octane:stop-dual web_sam dual
+./install.sh octane:status-dual web_sam dual
+./install.sh octane:restart-dual web_sam dual
+
+# Mode lainnya
+./install.sh octane:dual web_sam https-only  # HTTPS dengan redirect
+./install.sh octane:dual web_sam http-only   # HTTP only
+```
+
+**Mode yang tersedia:**
+- **`dual`**: HTTP (port 80) + HTTPS (port 443) tanpa redirect
+- **`https-only`**: HTTPS dengan auto-redirect dari HTTP
+- **`http-only`**: HTTP only (development)
+
+📖 **Dokumentasi lengkap**: Lihat `DUAL_MODE_GUIDE.md`
 
 ## ⚙️ Konfigurasi
 

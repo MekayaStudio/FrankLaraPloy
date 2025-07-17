@@ -690,6 +690,7 @@ create_octane_service() {
     local app_name="$1"
     local app_dir="$2"
     local domain="$3"
+    local mode="${4:-https-only}"  # https-only, http-only, dual
     
     # If called with just app_name, get other parameters from config
     if [ -z "$app_dir" ]; then
@@ -707,62 +708,10 @@ create_octane_service() {
         return 1
     fi
     
-    log_info "🔧 Creating systemd service for $app_name"
+    log_info "🔧 Creating systemd service for $app_name with mode: $mode"
     
-    # Create service file
-    cat > "/etc/systemd/system/octane-$app_name.service" << EOF
-[Unit]
-Description=Laravel Octane Server for $app_name
-Documentation=https://laravel.com/docs/octane
-After=network.target mysql.service
-Wants=mysql.service
-
-[Service]
-Type=simple
-User=www-data
-Group=www-data
-WorkingDirectory=$app_dir
-ExecStart=/usr/bin/php artisan octane:frankenphp --host=$domain --port=443 --https --http-redirect --log-level=info
-ExecReload=/bin/kill -USR1 \$MAINPID
-KillMode=mixed
-KillSignal=SIGINT
-TimeoutStopSec=10
-Restart=always
-RestartSec=10
-
-# Capabilities for binding to privileged ports
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-
-# Security settings
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=$app_dir /tmp /var/lib/frankenphp/$app_name /var/log/frankenphp
-LimitNOFILE=65536
-
-# Environment
-Environment=APP_ENV=production
-Environment=APP_DEBUG=false
-Environment=XDG_DATA_HOME=/var/lib/frankenphp/$app_name
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    
-    # Set proper ownership
-    chmod 644 "/etc/systemd/system/octane-$app_name.service"
-    
-    # Allow www-data to bind to privileged ports
-    if command -v setcap >/dev/null 2>&1; then
-        # Find actual PHP binary (not symlink)
-        local php_binary=$(readlink -f /usr/bin/php)
-        if [ -f "$php_binary" ]; then
-            setcap 'cap_net_bind_service=+ep' "$php_binary"
-        fi
-    fi
-    
-    log_info "✅ Systemd service created"
+    # Use the dual mode service creation function
+    octane_create_dual_mode_service "$app_name" "$domain" "$app_dir" "$mode"
 }
 
 # =============================================

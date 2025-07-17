@@ -109,6 +109,13 @@ COMMANDS:
     octane:stop <app>              Stop Octane server
     octane:restart <app>           Restart Octane server
     octane:status <app>            Show Octane status
+    
+    Octane Dual Mode (HTTP/HTTPS):
+    octane:dual <app> [mode]       Configure dual mode (dual/https-only/http-only)
+    octane:start-dual <app> [mode] Start dual mode services
+    octane:stop-dual <app> [mode]  Stop dual mode services
+    octane:status-dual <app> [mode] Show dual mode status
+    octane:restart-dual <app> [mode] Restart dual mode services
 
 EXAMPLES:
     # Setup system
@@ -125,10 +132,17 @@ EXAMPLES:
     
     # View logs
     sudo ./install.sh logs myapp 100
+    
+    # Configure dual mode (HTTP + HTTPS)
+    sudo ./install.sh octane:dual myapp dual
+    
+    # Check dual mode status
+    sudo ./install.sh octane:status-dual myapp dual
 
 FEATURES:
     ✅ Laravel Octane with FrankenPHP (no nginx/apache needed)
     ✅ Automatic HTTPS with Let's Encrypt
+    ✅ HTTP/HTTPS dual mode support (no redirect)
     ✅ Built-in PHP runtime (no PHP-FPM)
     ✅ HTTP/2 and HTTP/3 support
     ✅ Automatic database setup
@@ -256,6 +270,64 @@ main() {
         "octane:status")
             shift
             octane_status "$@"
+            ;;
+            
+        # Dual mode commands
+        "octane:dual")
+            shift
+            local app_name="$1"
+            local mode="${2:-dual}"
+            if [ -n "$app_name" ]; then
+                octane_configure_mode "$app_name" "$mode"
+            else
+                log_error "Usage: octane:dual <app-name> [mode]"
+                log_info "Available modes: dual, https-only, http-only"
+                exit 1
+            fi
+            ;;
+        "octane:start-dual")
+            shift
+            local app_name="$1"
+            local mode="${2:-dual}"
+            if [ -n "$app_name" ]; then
+                octane_start_dual_mode "$app_name" "$mode"
+            else
+                log_error "Usage: octane:start-dual <app-name> [mode]"
+                exit 1
+            fi
+            ;;
+        "octane:stop-dual")
+            shift
+            local app_name="$1"
+            local mode="${2:-dual}"
+            if [ -n "$app_name" ]; then
+                octane_stop_dual_mode "$app_name" "$mode"
+            else
+                log_error "Usage: octane:stop-dual <app-name> [mode]"
+                exit 1
+            fi
+            ;;
+        "octane:status-dual")
+            shift
+            local app_name="$1"
+            local mode="${2:-dual}"
+            if [ -n "$app_name" ]; then
+                octane_status_dual_mode "$app_name" "$mode"
+            else
+                log_error "Usage: octane:status-dual <app-name> [mode]"
+                exit 1
+            fi
+            ;;
+        "octane:restart-dual")
+            shift
+            local app_name="$1"
+            local mode="${2:-dual}"
+            if [ -n "$app_name" ]; then
+                octane_restart_dual_mode "$app_name" "$mode"
+            else
+                log_error "Usage: octane:restart-dual <app-name> [mode]"
+                exit 1
+            fi
             ;;
             
         *)

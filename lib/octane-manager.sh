@@ -154,6 +154,452 @@ octane_create_service() {
 }
 
 # =============================================
+# HTTP/HTTPS Dual Mode Management
+# =============================================
+
+octane_create_dual_mode_service() {
+    local app_name="$1"
+    local domain="$2"
+    local app_dir="$3"
+    local mode="${4:-dual}"  # dual, https-only, http-only
+
+    if [ -z "$app_name" ] || [ -z "$domain" ] || [ -z "$app_dir" ]; then
+        log_error "Usage: octane_create_dual_mode_service <app_name> <domain> <app_dir> [mode]"
+        return 1
+    fi
+
+    log_info "🔧 Creating Octane service with mode: $mode for $app_name"
+
+    case "$mode" in
+        "dual")
+            _create_dual_mode_services "$app_name" "$domain" "$app_dir"
+            ;;
+        "https-only")
+            _create_https_only_service "$app_name" "$domain" "$app_dir"
+            ;;
+        "http-only")
+            _create_http_only_service "$app_name" "$domain" "$app_dir"
+            ;;
+        *)
+            log_error "Invalid mode: $mode. Use: dual, https-only, http-only"
+            return 1
+            ;;
+    esac
+}
+
+_create_dual_mode_services() {
+    local app_name="$1"
+    local domain="$2"
+    local app_dir="$3"
+
+    log_info "🌐 Creating dual mode services (HTTP + HTTPS) for $app_name"
+
+    # Create HTTPS service (port 443)
+    cat > "/etc/systemd/system/octane-$app_name-https.service" << EOF
+[Unit]
+Description=Laravel Octane HTTPS Server for $app_name
+Documentation=https://laravel.com/docs/octane
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=$app_dir
+ExecStart=/usr/bin/php artisan octane:frankenphp --host=$domain --port=443 --https --workers=4 --max-requests=1000 --log-level=info
+ExecReload=/bin/kill -USR1 \$MAINPID
+KillMode=mixed
+KillSignal=SIGINT
+TimeoutStopSec=10
+Restart=always
+RestartSec=10
+
+# Capabilities for binding to privileged ports
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=$app_dir /tmp /var/lib/frankenphp/$app_name /var/log/frankenphp
+LimitNOFILE=65536
+
+# Environment
+Environment=APP_ENV=production
+Environment=APP_DEBUG=false
+Environment=XDG_DATA_HOME=/var/lib/frankenphp/$app_name
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Create HTTP service (port 80) - NO redirect
+    cat > "/etc/systemd/system/octane-$app_name-http.service" << EOF
+[Unit]
+Description=Laravel Octane HTTP Server for $app_name
+Documentation=https://laravel.com/docs/octane
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=$app_dir
+ExecStart=/usr/bin/php artisan octane:frankenphp --host=$domain --port=80 --workers=4 --max-requests=1000 --log-level=info
+ExecReload=/bin/kill -USR1 \$MAINPID
+KillMode=mixed
+KillSignal=SIGINT
+TimeoutStopSec=10
+Restart=always
+RestartSec=10
+
+# Capabilities for binding to privileged ports
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=$app_dir /tmp /var/lib/frankenphp/$app_name /var/log/frankenphp
+LimitNOFILE=65536
+
+# Environment
+Environment=APP_ENV=production
+Environment=APP_DEBUG=false
+Environment=XDG_DATA_HOME=/var/lib/frankenphp/$app_name
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Set proper ownership
+    chmod 644 "/etc/systemd/system/octane-$app_name-https.service"
+    chmod 644 "/etc/systemd/system/octane-$app_name-http.service"
+
+    # Allow www-data to bind to privileged ports
+    if command -v setcap >/dev/null 2>&1; then
+        local php_binary=$(readlink -f /usr/bin/php)
+        if [ -f "$php_binary" ]; then
+            setcap 'cap_net_bind_service=+ep' "$php_binary"
+        fi
+    fi
+
+    log_info "✅ Dual mode services created:"
+    log_info "   - HTTPS: octane-$app_name-https (port 443)"
+    log_info "   - HTTP: octane-$app_name-http (port 80, no redirect)"
+}
+
+_create_https_only_service() {
+    local app_name="$1"
+    local domain="$2"
+    local app_dir="$3"
+
+    log_info "🔒 Creating HTTPS-only service for $app_name"
+
+    # Create HTTPS service with HTTP redirect
+    cat > "/etc/systemd/system/octane-$app_name.service" << EOF
+[Unit]
+Description=Laravel Octane HTTPS Server for $app_name
+Documentation=https://laravel.com/docs/octane
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=$app_dir
+ExecStart=/usr/bin/php artisan octane:frankenphp --host=$domain --port=443 --https --http-redirect --workers=4 --max-requests=1000 --log-level=info
+ExecReload=/bin/kill -USR1 \$MAINPID
+KillMode=mixed
+KillSignal=SIGINT
+TimeoutStopSec=10
+Restart=always
+RestartSec=10
+
+# Capabilities for binding to privileged ports
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=$app_dir /tmp /var/lib/frankenphp/$app_name /var/log/frankenphp
+LimitNOFILE=65536
+
+# Environment
+Environment=APP_ENV=production
+Environment=APP_DEBUG=false
+Environment=XDG_DATA_HOME=/var/lib/frankenphp/$app_name
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    chmod 644 "/etc/systemd/system/octane-$app_name.service"
+
+    # Allow www-data to bind to privileged ports
+    if command -v setcap >/dev/null 2>&1; then
+        local php_binary=$(readlink -f /usr/bin/php)
+        if [ -f "$php_binary" ]; then
+            setcap 'cap_net_bind_service=+ep' "$php_binary"
+        fi
+    fi
+
+    log_info "✅ HTTPS-only service created: octane-$app_name (port 443 with HTTP redirect)"
+}
+
+_create_http_only_service() {
+    local app_name="$1"
+    local domain="$2"
+    local app_dir="$3"
+
+    log_info "🌐 Creating HTTP-only service for $app_name"
+
+    # Create HTTP service only
+    cat > "/etc/systemd/system/octane-$app_name.service" << EOF
+[Unit]
+Description=Laravel Octane HTTP Server for $app_name
+Documentation=https://laravel.com/docs/octane
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=$app_dir
+ExecStart=/usr/bin/php artisan octane:frankenphp --host=$domain --port=80 --workers=4 --max-requests=1000 --log-level=info
+ExecReload=/bin/kill -USR1 \$MAINPID
+KillMode=mixed
+KillSignal=SIGINT
+TimeoutStopSec=10
+Restart=always
+RestartSec=10
+
+# Capabilities for binding to privileged ports
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=$app_dir /tmp /var/lib/frankenphp/$app_name /var/log/frankenphp
+LimitNOFILE=65536
+
+# Environment
+Environment=APP_ENV=production
+Environment=APP_DEBUG=false
+Environment=XDG_DATA_HOME=/var/lib/frankenphp/$app_name
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    chmod 644 "/etc/systemd/system/octane-$app_name.service"
+
+    # Allow www-data to bind to privileged ports
+    if command -v setcap >/dev/null 2>&1; then
+        local php_binary=$(readlink -f /usr/bin/php)
+        if [ -f "$php_binary" ]; then
+            setcap 'cap_net_bind_service=+ep' "$php_binary"
+        fi
+    fi
+
+    log_info "✅ HTTP-only service created: octane-$app_name (port 80)"
+}
+
+octane_start_dual_mode() {
+    local app_name="$1"
+    local mode="${2:-dual}"
+
+    if [ -z "$app_name" ]; then
+        log_error "Usage: octane_start_dual_mode <app_name> [mode]"
+        return 1
+    fi
+
+    log_info "🚀 Starting Octane services for $app_name in $mode mode"
+
+    case "$mode" in
+        "dual")
+            systemctl daemon-reload
+            systemctl enable "octane-$app_name-https"
+            systemctl enable "octane-$app_name-http"
+            systemctl start "octane-$app_name-https"
+            systemctl start "octane-$app_name-http"
+            log_info "✅ Dual mode services started"
+            ;;
+        "https-only")
+            systemctl daemon-reload
+            systemctl enable "octane-$app_name"
+            systemctl start "octane-$app_name"
+            log_info "✅ HTTPS-only service started"
+            ;;
+        "http-only")
+            systemctl daemon-reload
+            systemctl enable "octane-$app_name"
+            systemctl start "octane-$app_name"
+            log_info "✅ HTTP-only service started"
+            ;;
+        *)
+            log_error "Invalid mode: $mode"
+            return 1
+            ;;
+    esac
+}
+
+octane_stop_dual_mode() {
+    local app_name="$1"
+    local mode="${2:-dual}"
+
+    if [ -z "$app_name" ]; then
+        log_error "Usage: octane_stop_dual_mode <app_name> [mode]"
+        return 1
+    fi
+
+    log_info "🛑 Stopping Octane services for $app_name in $mode mode"
+
+    case "$mode" in
+        "dual")
+            systemctl stop "octane-$app_name-https" 2>/dev/null || true
+            systemctl stop "octane-$app_name-http" 2>/dev/null || true
+            systemctl disable "octane-$app_name-https" 2>/dev/null || true
+            systemctl disable "octane-$app_name-http" 2>/dev/null || true
+            log_info "✅ Dual mode services stopped"
+            ;;
+        "https-only"|"http-only")
+            systemctl stop "octane-$app_name" 2>/dev/null || true
+            systemctl disable "octane-$app_name" 2>/dev/null || true
+            log_info "✅ Service stopped"
+            ;;
+        *)
+            log_error "Invalid mode: $mode"
+            return 1
+            ;;
+    esac
+}
+
+octane_status_dual_mode() {
+    local app_name="$1"
+    local mode="${2:-dual}"
+
+    if [ -z "$app_name" ]; then
+        log_error "Usage: octane_status_dual_mode <app_name> [mode]"
+        return 1
+    fi
+
+    log_info "📊 Octane service status for $app_name ($mode mode)"
+
+    case "$mode" in
+        "dual")
+            echo ""
+            echo "HTTPS Service (octane-$app_name-https):"
+            systemctl status "octane-$app_name-https" --no-pager -l || true
+            echo ""
+            echo "HTTP Service (octane-$app_name-http):"
+            systemctl status "octane-$app_name-http" --no-pager -l || true
+            ;;
+        "https-only"|"http-only")
+            echo ""
+            systemctl status "octane-$app_name" --no-pager -l || true
+            ;;
+        *)
+            log_error "Invalid mode: $mode"
+            return 1
+            ;;
+    esac
+}
+
+octane_restart_dual_mode() {
+    local app_name="$1"
+    local mode="${2:-dual}"
+
+    if [ -z "$app_name" ]; then
+        log_error "Usage: octane_restart_dual_mode <app_name> [mode]"
+        return 1
+    fi
+
+    log_info "🔄 Restarting Octane services for $app_name in $mode mode"
+
+    case "$mode" in
+        "dual")
+            systemctl restart "octane-$app_name-https"
+            systemctl restart "octane-$app_name-http"
+            log_info "✅ Dual mode services restarted"
+            ;;
+        "https-only"|"http-only")
+            systemctl restart "octane-$app_name"
+            log_info "✅ Service restarted"
+            ;;
+        *)
+            log_error "Invalid mode: $mode"
+            return 1
+            ;;
+    esac
+}
+
+# =============================================
+# Configuration Management
+# =============================================
+
+octane_configure_mode() {
+    local app_name="$1"
+    local mode="$2"
+    local domain="$3"
+
+    if [ -z "$app_name" ] || [ -z "$mode" ]; then
+        log_error "Usage: octane_configure_mode <app_name> <mode> [domain]"
+        log_info "Available modes: dual, https-only, http-only"
+        return 1
+    fi
+
+    local app_dir="$APPS_BASE_DIR/$app_name"
+    if [ ! -d "$app_dir" ]; then
+        log_error "App directory not found: $app_dir"
+        return 1
+    fi
+
+    # Get domain from config if not provided
+    if [ -z "$domain" ]; then
+        if [ -f "/etc/laravel-apps/$app_name.conf" ]; then
+            domain=$(grep "DOMAIN=" "/etc/laravel-apps/$app_name.conf" | cut -d'=' -f2 | tr -d '"')
+        fi
+    fi
+
+    if [ -z "$domain" ]; then
+        log_error "Domain not specified and not found in config"
+        return 1
+    fi
+
+    log_info "⚙️  Configuring Octane mode: $mode for $app_name"
+
+    # Stop existing services
+    octane_stop_dual_mode "$app_name" "dual" 2>/dev/null || true
+    octane_stop_dual_mode "$app_name" "https-only" 2>/dev/null || true
+    octane_stop_dual_mode "$app_name" "http-only" 2>/dev/null || true
+
+    # Remove old service files
+    rm -f "/etc/systemd/system/octane-$app_name.service"
+    rm -f "/etc/systemd/system/octane-$app_name-https.service"
+    rm -f "/etc/systemd/system/octane-$app_name-http.service"
+
+    # Create new service(s) based on mode
+    octane_create_dual_mode_service "$app_name" "$domain" "$app_dir" "$mode"
+
+    # Start services
+    octane_start_dual_mode "$app_name" "$mode"
+
+    log_info "✅ Octane mode configured successfully: $mode"
+    log_info "🔍 Check status: octane_status_dual_mode $app_name $mode"
+}
+
+# =============================================
 # Octane Health Check Functions
 # =============================================
 
