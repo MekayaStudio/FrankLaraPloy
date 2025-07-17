@@ -551,7 +551,7 @@ octane_restart_dual_mode() {
 octane_configure_mode() {
     local app_name="$1"
     local mode="$2"
-    local domain="$3"
+    local domain="${3:-}"
 
     if [ -z "$app_name" ] || [ -z "$mode" ]; then
         log_error "Usage: octane_configure_mode <app_name> <mode> [domain]"
