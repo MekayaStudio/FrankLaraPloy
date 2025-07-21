@@ -16,40 +16,40 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # =============================================
 
 # Load shared functions (contains logging, constants, etc)
-source "$SCRIPT_DIR/lib/shared-functions.sh"
+source "$SCRIPT_DIR/lib/utils/shared-functions.sh"
 
 # Load error handler
-source "$SCRIPT_DIR/lib/error-handler.sh"
+source "$SCRIPT_DIR/lib/utils/error-handler.sh"
 
 # Load validation module
-source "$SCRIPT_DIR/lib/validation.sh"
+source "$SCRIPT_DIR/lib/utils/validation.sh"
 
 # Load system setup module
-source "$SCRIPT_DIR/lib/system-setup.sh"
+source "$SCRIPT_DIR/lib/utils/system-setup.sh"
 
 # Load app management (includes Laravel and Octane management)
-source "$SCRIPT_DIR/lib/app-management.sh"
+source "$SCRIPT_DIR/lib/core/app-management.sh"
 
 # Load Octane manager
-source "$SCRIPT_DIR/lib/octane-manager.sh"
+source "$SCRIPT_DIR/lib/modules/octane-manager.sh"
 
 # Load systemd manager
-source "$SCRIPT_DIR/lib/systemd-manager.sh"
+source "$SCRIPT_DIR/lib/modules/systemd-manager.sh"
 
 # Load SSL manager
-source "$SCRIPT_DIR/lib/ssl-manager.sh"
+source "$SCRIPT_DIR/lib/modules/ssl-manager.sh"
 
 # Load security module
-source "$SCRIPT_DIR/lib/security.sh"
+source "$SCRIPT_DIR/lib/utils/security.sh"
 
 # Load database manager
-source "$SCRIPT_DIR/lib/database-manager.sh"
+source "$SCRIPT_DIR/lib/modules/database-manager.sh"
 
 # Load debug manager
-source "$SCRIPT_DIR/lib/debug-manager.sh"
+source "$SCRIPT_DIR/lib/utils/debug-manager.sh"
 
 # Load connection manager
-source "$SCRIPT_DIR/lib/connection-manager.sh"
+source "$SCRIPT_DIR/lib/modules/connection-manager.sh"
 
 # =============================================
 # Configuration Variables

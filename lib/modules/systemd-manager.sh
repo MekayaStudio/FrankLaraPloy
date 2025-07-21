@@ -13,10 +13,10 @@ export SYSTEMD_MANAGER_LOADED=1
 
 # Load dependencies
 if [ -z "${SHARED_FUNCTIONS_LOADED:-}" ]; then
-    source "$SCRIPT_DIR/lib/shared-functions.sh"
+    source "$SCRIPT_DIR/lib/utils/shared-functions.sh"
 fi
 if [ -z "${ERROR_HANDLER_LOADED:-}" ]; then
-    source "$SCRIPT_DIR/lib/error-handler.sh"
+    source "$SCRIPT_DIR/lib/utils/error-handler.sh"
 fi
 
 # =============================================

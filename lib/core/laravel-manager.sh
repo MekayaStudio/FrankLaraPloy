@@ -15,19 +15,19 @@ export LARAVEL_MANAGER_LOADED=1
 
 # Load dependencies
 if [ -z "${SHARED_FUNCTIONS_LOADED:-}" ]; then
-    source "$SCRIPT_DIR/lib/shared-functions.sh"
+    source "$SCRIPT_DIR/lib/utils/shared-functions.sh"
 fi
 if [ -z "${ERROR_HANDLER_LOADED:-}" ]; then
-    source "$SCRIPT_DIR/lib/error-handler.sh"
+    source "$SCRIPT_DIR/lib/utils/error-handler.sh"
 fi
 if [ -z "${OCTANE_MANAGER_LOADED:-}" ]; then
-    source "$SCRIPT_DIR/lib/octane-manager.sh"
+    source "$SCRIPT_DIR/lib/modules/octane-manager.sh"
 fi
 if [ -z "${DATABASE_MANAGER_LOADED:-}" ]; then
-    source "$SCRIPT_DIR/lib/database-manager.sh"
+    source "$SCRIPT_DIR/lib/modules/database-manager.sh"
 fi
 if [ -z "${SYSTEMD_MANAGER_LOADED:-}" ]; then
-    source "$SCRIPT_DIR/lib/systemd-manager.sh"
+    source "$SCRIPT_DIR/lib/modules/systemd-manager.sh"
 fi
 
 # =============================================

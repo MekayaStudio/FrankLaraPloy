@@ -1,575 +1,589 @@
-# FrankenPHP Multi-App Deployment System
+# FrankenPHP Multi-App Deployer 🚀
 
-Sistem deployment multi-aplikasi Laravel yang menggunakan FrankenPHP dengan dukungan Laravel Octane, load balancing, dan resource monitoring yang cerdas.
+> **Laravel Octane Management Tool dengan FrankenPHP** - Deploy multiple Laravel apps dengan mudah!
 
-## 🚀 Fitur Utama
+[![Version](https://img.shields.io/badge/version-3.0-blue.svg)](https://github.com/MekayaStudio/FrankLaraPloy)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![PHP](https://img.shields.io/badge/PHP-8.3+-777BB4.svg)](https://php.net)
+[![Laravel](https://img.shields.io/badge/Laravel-11+-FF2D20.svg)](https://laravel.com)
 
-### 🔥 Laravel Octane + FrankenPHP
-- **Embedded PHP Server**: Tidak memerlukan PHP-FPM
-- **Built-in Web Server**: FrankenPHP dengan Caddy terintegrasi
-- **Auto HTTPS**: Let's Encrypt terintegrasi otomatis
-- **🌐 HTTP/HTTPS Dual Mode**: Support HTTP dan HTTPS tanpa redirect
-- **Worker Optimization**: Kalkulasi thread optimal berdasarkan CPU/Memory
-- **Pure Laravel Ecosystem**: Fokus eksklusif pada Laravel Octane + FrankenPHP
-- **Indonesia Mirror**: Menggunakan mirror server Indonesia untuk download lebih cepat
+## 🌟 Features
 
-### 📈 Horizontal Scaling
-- **Load Balancer**: Round-robin load balancing
-- **Multi-Instance**: Scaling horizontal per aplikasi
-- **Health Checks**: Monitoring kesehatan instance
-- **Zero-Downtime**: Deployment tanpa downtime
+- ✅ **Laravel Octane** dengan FrankenPHP (embedded web server)
+- ✅ **Automatic HTTPS** dengan Let's Encrypt (built-in)
+- ✅ **HTTP/HTTPS dual mode** support 
+- ✅ **Built-in PHP runtime** (tidak perlu PHP-FPM)
+- ✅ **HTTP/2 dan HTTP/3** support
+- ✅ **Automatic database** setup
+- ✅ **Systemd service** management
+- ✅ **Queue worker** management
+- ✅ **Scheduler** setup
+- ✅ **Production optimization**
+- ✅ **Zero-config SSL** certificates
 
-### 🧠 Resource Awareness
-- **Pre-flight Checks**: Validasi resource sebelum deployment
-- **Smart Thread Allocation**: Optimasi berdasarkan kapasitas server
-- **Resource Monitoring**: Real-time monitoring CPU/Memory
-- **Capacity Planning**: Prediksi dampak perubahan
+## 📋 Daftar Isi
 
-### 🔧 Multi-App Support
-- **Isolated Apps**: Setiap app memiliki database dan konfigurasi terpisah
-- **GitHub Integration**: Auto-deployment dari repository
-- **Database Management**: MySQL database per app
-- **Backup System**: Backup otomatis harian
+- [Quick Start](#-quick-start)
+- [System Requirements](#-system-requirements)
+- [Installation](#-installation)
+- [Command Reference](#-command-reference)
+- [HTTP/HTTPS Modes](#-httphttps-modes)
+- [Architecture](#-architecture)
+- [Workflow](#-workflow)
+- [Examples](#-examples)
+- [Troubleshooting](#-troubleshooting)
+- [Advanced Usage](#-advanced-usage)
 
-## 📁 Struktur Project
-
-```
-scripts/
-├── lib/                              # Modular libraries
-│   ├── shared-functions.sh           # Common utilities
-│   ├── error-handler.sh              # Error handling & rollback
-│   ├── validation.sh                 # Comprehensive validation
-│   ├── app-management.sh             # App lifecycle management
-│   ├── octane-manager.sh             # Laravel Octane operations
-│   ├── database-manager.sh           # Database operations
-│   ├── systemd-manager.sh            # Service management
-│   ├── ssl-manager.sh                # SSL/HTTPS management
-│   ├── connection-manager.sh         # Connection troubleshooting
-│   └── debug-manager.sh              # Testing and debugging
-├── config/
-│   └── frankenphp-config.conf        # System configuration
-├── install.sh                       # 🆕 Main installer (refactored)
-└── README.md                         # This documentation
-```
-
-## 🛠️ Instalasi
-
-### Persyaratan Sistem
-
-- **OS**: Ubuntu 24.04 LTS
-- **RAM**: Minimum 1GB (recommended 2GB+)
-- **Storage**: Minimum 5GB free space
-- **Network**: Koneksi internet untuk download dependencies
-- **User**: Root access required
-
-### Quick Start
+## 🚀 Quick Start
 
 ```bash
-# Clone repository
-git clone <repository-url>
-cd scripts
+# 1. Clone repository
+git clone https://github.com/MekayaStudio/FrankLaraPloy.git
+cd FrankLaraPloy
 
-# Setup sistem (one-time setup)
+# 2. Setup system (install FrankenPHP, MySQL, dependencies)
 sudo ./install.sh setup
 
-# Install aplikasi Laravel baru
-./install.sh install web_sam example.com https://github.com/user/repo.git
+# 3. Deploy Laravel app
+sudo ./install.sh install myapp mydomain.com
 
-# Atau quick install (setup + install sekaligus)
-sudo ./install.sh quick web_sam example.com https://github.com/user/repo.git
+# 4. Check status
+sudo ./install.sh status myapp
 ```
 
-## 📚 Penggunaan
+## 💻 System Requirements
 
-### 1. Deployment Aplikasi Baru
+- **OS**: Ubuntu 20.04+ / Debian 11+
+- **Memory**: Minimum 1GB RAM (2GB+ recommended)
+- **Storage**: Minimum 2GB free space
+- **Network**: Port 80, 443 accessible (untuk SSL)
+- **Privileges**: Root access required
+
+## 📦 Installation
+
+### Step 1: Download dan Persiapan
 
 ```bash
-# Dengan GitHub repository
-./install.sh install web_sam testingsetup.rizqis.com https://github.com/CompleteLabs/web-app-sam.git
+# Download script
+wget https://github.com/MekayaStudio/FrankLaraPloy/archive/main.zip
+unzip main.zip
+cd FrankLaraPloy-main
 
-# Tanpa GitHub (manual deployment)
-./install.sh install web_api api.completelabs.com
+# Atau clone dari git
+git clone https://github.com/MekayaStudio/FrankLaraPloy.git
+cd FrankLaraPloy
 
-# Quick install (setup + install sekaligus)
-sudo ./install.sh quick web_sam example.com https://github.com/user/repo.git
+# Make executable
+chmod +x install.sh
 ```
 
-### 2. Laravel Octane Helper
+### Step 2: System Setup
 
 ```bash
-# Install Laravel Octane + FrankenPHP
-./install.sh octane:install /opt/laravel-apps/web_sam
-
-# Start/Stop/Status server
-./install.sh octane:start
-./install.sh octane:stop
-./install.sh octane:status
-
-# Restart server
-./install.sh octane:restart
-
-# Optimize for production
-./install.sh octane:optimize
-
-# 🌐 Dual Mode (HTTP/HTTPS tanpa redirect)
-./install.sh octane:dual web_sam dual
-./install.sh octane:start-dual web_sam dual
-./install.sh octane:status-dual web_sam dual
+# Setup lengkap sistem
+sudo ./install.sh setup
 ```
 
-### 3. Manajemen Aplikasi
+Proses ini akan menginstall:
+- FrankenPHP binary
+- MySQL server
+- Redis server
+- Node.js & NPM
+- Composer
+- Dependencies lainnya
 
-```bash
-# List semua aplikasi
-./install.sh list
+## 🛠️ Command Reference
 
-# Deploy ulang aplikasi
-./install.sh deploy web_sam
+### System Commands
 
-# Status aplikasi
-./install.sh status web_sam
+| Command | Description |
+|---------|-------------|
+| `sudo ./install.sh setup` | Setup sistem dengan FrankenPHP + Laravel Octane |
+| `sudo ./install.sh debug [app]` | Debug sistem atau aplikasi spesifik |
 
-# Remove aplikasi
-./install.sh remove web_sam
+### App Management
+
+| Command | Description |
+|---------|-------------|
+| `sudo ./install.sh install <app> <domain> [repo] [db-name] [octane-mode] [http-mode]` | Install Laravel app baru |
+| `sudo ./install.sh remove <app>` | Hapus Laravel app |
+| `sudo ./install.sh list` | List semua aplikasi yang terinstall |
+| `sudo ./install.sh resources` | Tampilkan penggunaan resource multi-app |
+| `sudo ./install.sh status <app>` | Tampilkan status aplikasi |
+| `sudo ./install.sh logs <app> [lines]` | Tampilkan log aplikasi |
+
+### Service Management
+
+| Command | Description |
+|---------|-------------|
+| `sudo ./install.sh systemd:check <app>` | Cek systemd service |
+| `sudo ./install.sh systemd:fix <app>` | Perbaiki systemd service |
+| `sudo ./install.sh systemd:fix-all` | Perbaiki semua systemd services |
+| `sudo ./install.sh systemd:list` | List semua services |
+
+### Database Management
+
+| Command | Description |
+|---------|-------------|
+| `sudo ./install.sh db:check <app>` | Cek koneksi database |
+| `sudo ./install.sh db:fix <app>` | Perbaiki masalah database |
+| `sudo ./install.sh db:reset <app>` | Reset database |
+| `sudo ./install.sh db:list` | List database aplikasi |
+| `sudo ./install.sh db:status` | Tampilkan status MySQL |
+
+### Octane Management
+
+| Command | Description |
+|---------|-------------|
+| `sudo ./install.sh octane:install <app>` | Install Octane di aplikasi existing |
+| `sudo ./install.sh octane:start <app>` | Start Octane server |
+| `sudo ./install.sh octane:stop <app>` | Stop Octane server |
+| `sudo ./install.sh octane:restart <app>` | Restart Octane server |
+| `sudo ./install.sh octane:status <app>` | Tampilkan status Octane |
+
+### Octane Dual Mode (HTTP/HTTPS)
+
+| Command | Description |
+|---------|-------------|
+| `sudo ./install.sh octane:dual <app> [mode]` | Konfigurasi dual mode |
+| `sudo ./install.sh octane:start-dual <app> [mode]` | Start dual mode services |
+| `sudo ./install.sh octane:stop-dual <app> [mode]` | Stop dual mode services |
+| `sudo ./install.sh octane:status-dual <app> [mode]` | Tampilkan status dual mode |
+| `sudo ./install.sh octane:restart-dual <app> [mode]` | Restart dual mode services |
+
+### SSL Management
+
+| Command | Description |
+|---------|-------------|
+| `sudo ./install.sh ssl:status <app>` | Tampilkan status SSL (otomatis via FrankenPHP) |
+| `sudo ./install.sh ssl:info` | Tampilkan informasi SSL |
+
+## 🌐 HTTP/HTTPS Modes
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| `http-only` | Hanya HTTP (port 80) | Development/testing |
+| `https-only` | Hanya HTTPS dengan HTTP redirect (port 443) | Production dengan keamanan tinggi |
+| `dual` | HTTP dan HTTPS (tanpa redirect) | Kompatibilitas maksimum |
+
+## 🏗️ Architecture
+
+```mermaid
+graph TB
+    subgraph "Server Environment"
+        subgraph "FrankenPHP"
+            FP[FrankenPHP Binary]
+            HTTP[HTTP Server :80]
+            HTTPS[HTTPS Server :443]
+            PHP[Built-in PHP 8.3]
+        end
+        
+        subgraph "Laravel Apps"
+            APP1[App 1<br/>Octane Worker]
+            APP2[App 2<br/>Octane Worker]
+            APP3[App N<br/>Octane Worker]
+        end
+        
+        subgraph "Services"
+            MYSQL[(MySQL Database)]
+            REDIS[(Redis Cache)]
+            QUEUE[Queue Workers]
+            SCHEDULER[Task Scheduler]
+        end
+        
+        subgraph "System"
+            SYSTEMD[Systemd Services]
+            LOGS[Log Management]
+            SSL[Let's Encrypt SSL]
+        end
+    end
+    
+    subgraph "External"
+        INTERNET((Internet))
+        DOMAIN[Domain Names]
+        LETSENCRYPT[Let's Encrypt CA]
+    end
+    
+    INTERNET --> HTTP
+    INTERNET --> HTTPS
+    HTTP --> FP
+    HTTPS --> FP
+    FP --> PHP
+    PHP --> APP1
+    PHP --> APP2
+    PHP --> APP3
+    APP1 --> MYSQL
+    APP2 --> MYSQL
+    APP3 --> MYSQL
+    APP1 --> REDIS
+    APP2 --> REDIS
+    APP3 --> REDIS
+    SYSTEMD --> QUEUE
+    SYSTEMD --> SCHEDULER
+    DOMAIN --> LETSENCRYPT
+    LETSENCRYPT --> SSL
+    SSL --> HTTPS
 ```
 
-### 4. Horizontal Scaling
+## 🔄 Workflow
 
-```bash
-# Scale up (tambah instance)
-./install.sh scale web_sam up 8001
-./install.sh scale web_sam up 8002
+### 1. System Setup Workflow
 
-# Scale down (hapus instance)
-./install.sh scale web_sam down 8002
-
-# Check status scaling
-./install.sh status web_sam
+```mermaid
+flowchart TD
+    START([Start Setup]) --> CHECK_ROOT{Root Access?}
+    CHECK_ROOT -->|No| ERROR_ROOT[❌ Error: Need sudo]
+    CHECK_ROOT -->|Yes| CHECK_OS{Ubuntu/Debian?}
+    CHECK_OS -->|No| ERROR_OS[❌ Error: Unsupported OS]
+    CHECK_OS -->|Yes| CHECK_SPACE{Disk Space > 2GB?}
+    CHECK_SPACE -->|No| ERROR_SPACE[❌ Error: Insufficient space]
+    CHECK_SPACE -->|Yes| UPDATE[📦 Update packages]
+    UPDATE --> INSTALL_DEPS[🔧 Install dependencies]
+    INSTALL_DEPS --> INSTALL_FRANKEN[🚀 Install FrankenPHP]
+    INSTALL_FRANKEN --> INSTALL_MYSQL[🗄️ Install MySQL]
+    INSTALL_MYSQL --> INSTALL_REDIS[📮 Install Redis]
+    INSTALL_REDIS --> SETUP_DIRS[📁 Setup directories]
+    SETUP_DIRS --> CONFIG_SERVICES[⚙️ Configure services]
+    CONFIG_SERVICES --> SUCCESS[✅ Setup Complete]
+    
+    ERROR_ROOT --> END([End])
+    ERROR_OS --> END
+    ERROR_SPACE --> END
+    SUCCESS --> END
 ```
 
-### 5. Resource Monitoring
+### 2. App Installation Workflow
 
-```bash
-# Monitor resource server
-./install.sh monitor
-
-# Debug system atau app
-./install.sh debug
-./install.sh debug web_sam
-
-# Test components
-./install.sh test
-
-# Backup semua apps
-./install.sh backup
+```mermaid
+flowchart TD
+    START([Install App]) --> VALIDATE{Validate Input}
+    VALIDATE -->|Invalid| ERROR[❌ Validation Error]
+    VALIDATE -->|Valid| CHECK_EXIST{App Exists?}
+    CHECK_EXIST -->|Yes| ERROR_EXIST[❌ App already exists]
+    CHECK_EXIST -->|No| CREATE_DIR[📁 Create app directory]
+    CREATE_DIR --> CLONE_OR_NEW{From Repository?}
+    CLONE_OR_NEW -->|Repository| CLONE[📥 Clone repository]
+    CLONE_OR_NEW -->|New| CREATE_LARAVEL[🆕 Create Laravel project]
+    CLONE --> INSTALL_DEPS[📦 Install dependencies]
+    CREATE_LARAVEL --> INSTALL_DEPS
+    INSTALL_DEPS --> SETUP_ENV[⚙️ Setup .env file]
+    SETUP_ENV --> CREATE_DB[🗄️ Create database]
+    CREATE_DB --> MIGRATE[🔄 Run migrations]
+    MIGRATE --> INSTALL_OCTANE[🚀 Install Octane]
+    INSTALL_OCTANE --> SELECT_MODE{Select HTTP Mode}
+    SELECT_MODE --> CONFIG_HTTP[⚙️ Configure HTTP/HTTPS]
+    CONFIG_HTTP --> CREATE_SYSTEMD[📋 Create systemd services]
+    CREATE_SYSTEMD --> START_SERVICES[▶️ Start services]
+    START_SERVICES --> SUCCESS[✅ App Installed]
+    
+    ERROR --> END([End])
+    ERROR_EXIST --> END
+    SUCCESS --> END
 ```
 
-### 6. 🌐 HTTP/HTTPS Dual Mode
+### 3. Service Management Workflow
 
-```bash
-# Konfigurasi dual mode (HTTP + HTTPS tanpa redirect)
-./install.sh octane:dual web_sam dual
-
-# Manajemen dual mode services
-./install.sh octane:start-dual web_sam dual
-./install.sh octane:stop-dual web_sam dual
-./install.sh octane:status-dual web_sam dual
-./install.sh octane:restart-dual web_sam dual
-
-# Mode lainnya
-./install.sh octane:dual web_sam https-only  # HTTPS dengan redirect
-./install.sh octane:dual web_sam http-only   # HTTP only
+```mermaid
+flowchart TD
+    START([Service Command]) --> IDENTIFY{Identify Command}
+    
+    IDENTIFY -->|start| START_SVC[▶️ Start Service]
+    IDENTIFY -->|stop| STOP_SVC[⏹️ Stop Service]
+    IDENTIFY -->|restart| RESTART_SVC[🔄 Restart Service]
+    IDENTIFY -->|status| CHECK_SVC[📊 Check Status]
+    IDENTIFY -->|fix| FIX_SVC[🔧 Fix Service]
+    
+    START_SVC --> CHECK_CONFIG{Config Valid?}
+    CHECK_CONFIG -->|No| FIX_CONFIG[🔧 Fix Configuration]
+    CHECK_CONFIG -->|Yes| SYSTEMCTL_START[systemctl start]
+    FIX_CONFIG --> SYSTEMCTL_START
+    SYSTEMCTL_START --> VERIFY_START{Service Running?}
+    VERIFY_START -->|No| ERROR_START[❌ Start Failed]
+    VERIFY_START -->|Yes| SUCCESS_START[✅ Started]
+    
+    STOP_SVC --> SYSTEMCTL_STOP[systemctl stop]
+    SYSTEMCTL_STOP --> SUCCESS_STOP[✅ Stopped]
+    
+    RESTART_SVC --> SYSTEMCTL_RESTART[systemctl restart]
+    SYSTEMCTL_RESTART --> SUCCESS_RESTART[✅ Restarted]
+    
+    CHECK_SVC --> SHOW_STATUS[📊 Show Status Info]
+    SHOW_STATUS --> SUCCESS_STATUS[✅ Status Shown]
+    
+    FIX_SVC --> DIAGNOSE[🔍 Diagnose Issues]
+    DIAGNOSE --> REPAIR[🔧 Repair Configuration]
+    REPAIR --> TEST_FIX[🧪 Test Fix]
+    TEST_FIX --> SUCCESS_FIX[✅ Fixed]
+    
+    ERROR_START --> END([End])
+    SUCCESS_START --> END
+    SUCCESS_STOP --> END
+    SUCCESS_RESTART --> END
+    SUCCESS_STATUS --> END
+    SUCCESS_FIX --> END
 ```
 
-**Mode yang tersedia:**
-- **`dual`**: HTTP (port 80) + HTTPS (port 443) tanpa redirect
-- **`https-only`**: HTTPS dengan auto-redirect dari HTTP
-- **`http-only`**: HTTP only (development)
+## 💡 Examples
 
-📖 **Dokumentasi lengkap**: Lihat `DUAL_MODE_GUIDE.md`
+### Basic Usage
 
-## ⚙️ Konfigurasi
-
-### File Konfigurasi Utama
-
-**`config/frankenphp-config.conf`**
 ```bash
-# Resource Management
-MEMORY_SAFETY_MARGIN=20
-CPU_SAFETY_MARGIN=25
-MIN_MEMORY_PER_APP=512
-MAX_MEMORY_PER_APP=2048
-THREAD_MEMORY_USAGE=80
-MAX_APPS_PER_SERVER=10
+# Setup sistem
+sudo ./install.sh setup
 
-# FrankenPHP Configuration
-DEFAULT_HTTP_PORT=80
-DEFAULT_HTTPS_PORT=443
-DEFAULT_OCTANE_PORT=8000
+# Install app sederhana
+sudo ./install.sh install blog myblog.com
 
-# Performance Settings
-PHP_MEMORY_LIMIT="512M"
-PHP_MAX_EXECUTION_TIME=300
-OPCACHE_MEMORY_CONSUMPTION=256
+# Install dengan mode HTTPS-only
+sudo ./install.sh install shop myshop.com "" "" smart https-only
+
+# Install dari GitHub repository
+sudo ./install.sh install api api.mydomain.com https://github.com/user/laravel-api.git api_db smart dual
 ```
 
-### Konfigurasi Per-App
-
-Setiap aplikasi memiliki file konfigurasi di `/etc/laravel-apps/`:
+### Advanced Usage
 
 ```bash
-# /etc/laravel-apps/web_sam.conf
-APP_NAME=web_sam
-APP_DIR=/opt/laravel-apps/web_sam
-DOMAIN=testingsetup.rizqis.com
-DB_NAME=web_sam_db
-DB_USER=web_sam_user
-DB_PASS=generated_password
-GITHUB_REPO=https://github.com/CompleteLabs/web-app-sam.git
-CREATED_AT=2024-01-01 10:00:00
-```
+# Konfigurasi dual mode untuk app existing
+sudo ./install.sh octane:dual myapp dual
 
-## 🔧 Advanced Usage
+# Start dual mode services
+sudo ./install.sh octane:start-dual myapp dual
 
-### Custom Environment Variables
+# Check status dual mode
+sudo ./install.sh octane:status-dual myapp dual
 
-```bash
-# Enable debug mode
-export DEBUG=true
-./install.sh debug
+# Debug app specific
+sudo ./install.sh debug myapp
 
-# Skip pre-flight checks (development)
-export SKIP_PREFLIGHT_CHECKS=true
-./install.sh install test_app localhost
+# Fix semua systemd services
+sudo ./install.sh systemd:fix-all
 ```
 
 ### Database Management
 
 ```bash
-# Manual database operations
-source /root/.mysql_credentials
-mysql -u root -p$MYSQL_ROOT_PASS
+# Check database connection
+sudo ./install.sh db:check myapp
 
-# Create database manually
-CREATE DATABASE `new_app_db`;
-CREATE USER 'new_app_user'@'localhost' IDENTIFIED BY 'secure_password';
-GRANT ALL PRIVILEGES ON `new_app_db`.* TO 'new_app_user'@'localhost';
-FLUSH PRIVILEGES;
+# List semua database apps
+sudo ./install.sh db:list
+
+# Reset database
+sudo ./install.sh db:reset myapp
+
+# Check MySQL status
+sudo ./install.sh db:status
 ```
 
-## 🛡️ Security Best Practices
-
-### 1. Systemd Security Settings
-
-Secara default, systemd service menggunakan pengaturan keamanan yang fleksibel untuk kompatibilitas. Anda dapat mengubah ke mode strict di `config/frankenphp-config.conf`:
-
-```bash
-# Untuk keamanan strict (mungkin menyebabkan konflik pada beberapa sistem)
-SYSTEMD_STRICT_SECURITY=true
-SYSTEMD_PRIVATE_TMP=true
-SYSTEMD_PRIVATE_DEVICES=true
-SYSTEMD_PROTECT_SYSTEM=strict
-SYSTEMD_PROTECT_HOME=true
-SYSTEMD_NO_NEW_PRIVILEGES=true
-
-# Untuk kompatibilitas maksimal (default)
-SYSTEMD_STRICT_SECURITY=false
-SYSTEMD_PRIVATE_TMP=false
-SYSTEMD_PRIVATE_DEVICES=false
-SYSTEMD_PROTECT_SYSTEM=false
-SYSTEMD_PROTECT_HOME=false
-SYSTEMD_NO_NEW_PRIVILEGES=false
-```
-
-### 2. Indonesia Mirror Configuration
-
-Script menggunakan mirror server Indonesia untuk download lebih cepat:
-
-```bash
-# Mirror yang digunakan (berurutan):
-# 1. mirror.unej.ac.id (Universitas Jember)
-# 2. buaya.klas.or.id (KLAS)
-# 3. archive.ubuntu.com (fallback)
-
-# Backup original sources.list disimpan di:
-# /etc/apt/sources.list.backup
-```
-
-### 3. Firewall Configuration
-
-```bash
-# Firewall sudah dikonfigurasi otomatis
-ufw status
-# Status: active
-# To                         Action      From
-# --                         ------      ----
-# 22/tcp                     ALLOW       Anywhere
-# 80/tcp                     ALLOW       Anywhere
-# 443/tcp                    ALLOW       Anywhere
-```
-
-### 2. File Permissions
-
-```bash
-# Permissions otomatis diatur
-ls -la /opt/laravel-apps/web_sam/
-# drwxr-xr-x www-data www-data
-# -rw-r--r-- www-data www-data
-```
-
-### 3. SSL/TLS Configuration
-
-```bash
-# Enable HTTPS otomatis
-enable-https-app web_sam
-
-# Manual SSL configuration
-# Edit Caddyfile dan ubah auto_https off menjadi auto_https on
-```
-
-## 📊 Monitoring & Logging
-
-### Log Files
-
-```bash
-# Application logs
-tail -f /var/log/frankenphp/web_sam.log
-
-# Error logs
-tail -f /var/log/frankenphp/error.log
-
-# System logs
-journalctl -u frankenphp-web_sam -f
-```
-
-### Resource Monitoring
-
-```bash
-# Real-time monitoring
-watch -n 5 'monitor-server-resources'
-
-# Detailed analysis
-analyze-app-resources | grep -A 10 "web_sam"
-
-# Performance metrics
-htop
-```
-
-### Health Checks
-
-```bash
-# Check app health
-curl http://localhost:8000/health
-
-# Check all services
-systemctl status frankenphp-web_sam
-systemctl status mysql
-systemctl status redis
-```
-
-## 🔄 Backup & Recovery
-
-### Automated Backup
-
-```bash
-# Backup otomatis setiap hari jam 2 pagi
-crontab -l | grep backup
-# 0 2 * * * /usr/local/bin/backup-all-laravel-apps
-
-# Manual backup
-backup-all-laravel-apps
-```
-
-### Recovery Process
-
-```bash
-# Restore dari backup
-cd /var/backups/laravel-apps/20240101_020000/
-
-# Restore database
-mysql -u root -p$MYSQL_ROOT_PASS web_sam_db < web_sam_database.sql
-
-# Restore application files
-tar -xzf web_sam_app.tar.gz -C /opt/laravel-apps/web_sam/
-```
-
-## 🐛 Troubleshooting
+## 🔧 Troubleshooting
 
 ### Common Issues
 
-**1. Systemd Namespace Issues (Exit Code 226/NAMESPACE)**
-
-Jika service gagal dengan error `status=226/NAMESPACE`, gunakan fix script:
-
+#### 1. Permission Errors
 ```bash
-# Fix service tertentu
-sudo ./fix-systemd-namespace.sh fix frankenphp-testing
+# Pastikan menggunakan sudo
+sudo ./install.sh command
 
-# Fix semua frankenphp services
-sudo ./fix-systemd-namespace.sh fix-all
-
-# Check status service
-sudo ./fix-systemd-namespace.sh check frankenphp-testing
+# Check file permissions
+ls -la install.sh
+# Should show: -rwxr-xr-x
 ```
 
-**📋 Dokumentasi lengkap**: Lihat `SYSTEMD_NAMESPACE_FIX.md`
-
-**2. FrankenPHP Binary Not Found**
+#### 2. Service Not Starting
 ```bash
-# Debug installation
-./install.sh debug
+# Check service status
+sudo ./install.sh systemd:check appname
 
-# Manual download
-cd /opt/laravel-apps/web_sam
-wget https://github.com/php/frankenphp/releases/download/v1.8.0/frankenphp-linux-x86_64
-mv frankenphp-linux-x86_64 frankenphp
-chmod +x frankenphp
+# Fix service configuration
+sudo ./install.sh systemd:fix appname
+
+# Check logs
+sudo ./install.sh logs appname 50
 ```
 
-**2. High Memory Usage**
+#### 3. Database Connection Issues
 ```bash
+# Check MySQL service
+sudo ./install.sh db:status
+
+# Check app database
+sudo ./install.sh db:check appname
+
+# Fix database issues
+sudo ./install.sh db:fix appname
+```
+
+#### 4. SSL Certificate Issues
+```bash
+# Check SSL status
+sudo ./install.sh ssl:status appname
+
+# View SSL info
+sudo ./install.sh ssl:info
+
+# Note: SSL certificates are managed automatically by FrankenPHP
+```
+
+### Debug Tools
+
+```bash
+# System debug overview
+sudo ./install.sh debug
+
+# App-specific debug
+sudo ./install.sh debug appname
+
+# Check all services
+sudo ./install.sh systemd:list
+
+# Resource usage
+sudo ./install.sh resources
+```
+
+## 🎯 Advanced Usage
+
+### Multi-App Management
+
+```bash
+# Install multiple apps
+sudo ./install.sh install app1 app1.domain.com
+sudo ./install.sh install app2 app2.domain.com
+sudo ./install.sh install app3 app3.domain.com
+
 # Check resource usage
-monitor-server-resources
+sudo ./install.sh resources
 
-# Optimize thread allocation
-optimize-server-resources
-
-# Reduce workers per app
-sed -i 's/OCTANE_WORKERS=8/OCTANE_WORKERS=4/' /opt/laravel-apps/web_sam/.env
-systemctl restart frankenphp-web_sam
+# List all apps
+sudo ./install.sh list
 ```
 
-**3. Database Connection Issues**
-```bash
-# Test connection
-mysql -u root -p$(cat /root/.mysql_credentials | cut -d'=' -f2)
-
-# Reset MySQL password
-mysql_secure_installation
-```
-
-**4. Port Already in Use**
-```bash
-# Check port usage
-netstat -tulpn | grep :8000
-
-# Kill process
-sudo kill -9 $(lsof -t -i:8000)
-```
-
-### Error Recovery
+### Performance Optimization
 
 ```bash
-# Rollback failed deployment
-# System otomatis melakukan rollback jika terjadi error
+# Configure untuk production
+sudo ./install.sh octane:dual app1 https-only
+sudo ./install.sh octane:dual app2 https-only
 
-# Manual rollback
-remove-laravel-app failed_app
-# Kemudian deploy ulang
-
-# Check error logs
-tail -f /var/log/frankenphp/error.log
+# Monitor resource usage
+watch "sudo ./install.sh resources"
 ```
 
-## 📈 Performance Optimization
-
-### 1. Thread Optimization
+### Backup & Maintenance
 
 ```bash
-# System otomatis menghitung optimal threads
-# Berdasarkan CPU cores dan memory available
+# Backup database
+mysqldump appname_db > backup.sql
 
-# Manual optimization
-CPU_CORES=$(nproc)
-OPTIMAL_THREADS=$((CPU_CORES + 2))
-echo "OCTANE_WORKERS=$OPTIMAL_THREADS" >> /opt/laravel-apps/web_sam/.env
+# Stop all services for maintenance
+sudo ./install.sh systemd:list
+sudo systemctl stop octane-*
+
+# Start all services
+sudo ./install.sh systemd:fix-all
 ```
 
-### 2. Memory Management
+## 📝 Configuration Files
+
+### Directory Structure
+```
+/opt/laravel-apps/           # Apps base directory
+├── app1/                    # App directory
+│   ├── .env                 # Environment config
+│   └── ...
+/etc/laravel-apps/           # Configuration directory
+├── app1.conf                # App-specific config
+└── ...
+/var/log/frankenphp/         # Log directory
+├── app1.log                 # App logs
+└── ...
+```
+
+### Environment Variables
+
+Key environment variables yang dapat dikustomisasi:
 
 ```bash
-# PHP memory optimization
-echo "memory_limit = 512M" >> /etc/php/8.3/cli/conf.d/99-custom.ini
+# App paths
+export APPS_BASE_DIR="/opt/laravel-apps"
+export LOG_DIR="/var/log/frankenphp"
+export CONFIG_DIR="/etc/laravel-apps"
 
-# OPcache optimization
-echo "opcache.memory_consumption = 256" >> /etc/php/8.3/cli/conf.d/99-custom.ini
-echo "opcache.max_accelerated_files = 20000" >> /etc/php/8.3/cli/conf.d/99-custom.ini
+# Resource limits
+export MIN_MEMORY_PER_APP="512"
+export MAX_MEMORY_PER_APP="2048"
+export MAX_APPS_PER_SERVER="10"
 ```
 
-### 3. Database Optimization
+## � Testing
+
+Untuk memvalidasi semua command berfungsi dengan baik:
 
 ```bash
-# MySQL optimization
-echo "innodb_buffer_pool_size = 1G" >> /etc/mysql/mysql.conf.d/mysqld.cnf
-echo "query_cache_size = 128M" >> /etc/mysql/mysql.conf.d/mysqld.cnf
-systemctl restart mysql
+# Quick validation
+bash validate-commands.sh
+
+# Comprehensive testing
+bash test-commands.sh
 ```
 
-## 🤝 Contributing
-
-### Development Setup
+### Manual Testing Examples
 
 ```bash
-# Enable debug mode
-export DEBUG=true
-export VERBOSE_LOGGING=true
+# Test basic commands
+sudo ./install.sh --help
+sudo ./install.sh list
+sudo ./install.sh systemd:list
+sudo ./install.sh db:status
+sudo ./install.sh ssl:info
 
-# Test validation
-./lib/validation.sh
+# Test app creation (example)
+sudo ./install.sh install testapp test.local
 
-# Test error handling
-./lib/error-handler.sh
+# Test app management
+sudo ./install.sh status testapp
+sudo ./install.sh logs testapp 20
+sudo ./install.sh octane:status testapp
+
+# Cleanup test
+sudo ./install.sh remove testapp
 ```
 
-### Code Structure
+## �🤝 Contributing
 
-- **lib/shared-functions.sh**: Fungsi-fungsi umum yang digunakan bersama
-- **lib/error-handler.sh**: Error handling dengan rollback mechanism
-- **lib/validation.sh**: Validasi komprehensif untuk berbagai input
-- **config/frankenphp-config.conf**: Konfigurasi sistem yang dapat disesuaikan
+1. Fork repository
+2. Create feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push ke branch (`git push origin feature/amazing-feature`)
+5. Buat Pull Request
 
-### Testing
+### Development Guidelines
 
-```bash
-# Test script dengan dry-run
-SKIP_PREFLIGHT_CHECKS=true ./install.sh debug
-
-# Test resource calculation
-./install.sh monitor
-
-# Test validation
-echo "test_app" | ./lib/validation.sh validate_app_name
-```
+- Test semua perubahan dengan `bash validate-commands.sh`
+- Pastikan documentation up-to-date
+- Follow existing code style
+- Add proper error handling
 
 ## 📄 License
 
-MIT License - Lihat file LICENSE untuk detail lengkap.
+Project ini dilisensikan under MIT License - lihat file [LICENSE](LICENSE) untuk detail.
 
 ## 🆘 Support
 
-Untuk bantuan dan dukungan:
+Jika Anda mengalami masalah atau memiliki pertanyaan:
 
-1. **Documentation**: Baca README ini dengan lengkap
-2. **Debug**: Gunakan `./install.sh debug` untuk troubleshooting
-3. **Monitoring**: Jalankan `./install.sh monitor` untuk analisis
-4. **Logs**: Periksa `/var/log/frankenphp/` untuk error logs
+1. Check [Troubleshooting](#-troubleshooting) section
+2. Buat [GitHub Issue](https://github.com/MekayaStudio/FrankLaraPloy/issues)
+3. Baca dokumentasi FrankenPHP di [frankenphp.dev](https://frankenphp.dev)
 
-## 🔮 Roadmap
+## 🙏 Acknowledgments
 
-### Version 2.1 (Planned)
-- [ ] Docker support
-- [ ] Kubernetes deployment
-- [ ] Advanced monitoring dashboard
-- [ ] Multi-server deployment
-- [ ] Database clustering
-
-### Version 2.2 (Future)
-- [ ] Web UI management
-- [ ] API endpoints
-- [ ] Webhook integration
-- [ ] Advanced security features
-- [ ] Performance analytics
+- [FrankenPHP](https://frankenphp.dev) - Modern PHP app server
+- [Laravel Octane](https://laravel.com/docs/octane) - High-performance Laravel
+- [Let's Encrypt](https://letsencrypt.org) - Free SSL certificates
 
 ---
 
-**Dibuat dengan ❤️ untuk deployment Laravel yang lebih mudah dan efisien**
+**Dibuat dengan ❤️ oleh [MekayaStudio](https://github.com/MekayaStudio)**
+
+*Deploy Laravel apps dengan mudah menggunakan FrankenPHP!* 🚀
