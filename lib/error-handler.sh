@@ -600,6 +600,6 @@ setup_error_handling() {
 }
 
 # Auto-initialize when sourced (only for root commands)
-if [ "${BASH_SOURCE[0]}" != "${0}" ] && [ "$EUID" -eq 0 ]; then
+if [ "${BASH_SOURCE[0]}" != "${0}" ] && [ "$EUID" -eq 0 ] && [ "${TEST_MODE:-false}" != "true" ]; then
     init_error_handler
 fi

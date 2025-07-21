@@ -3,7 +3,7 @@
 # =============================================
 # Shared Functions Library
 # Library untuk fungsi-fungsi yang digunakan bersama
-# oleh frankenphp-multiapp-deployer.sh dan install.sh
+# oleh Laravel Octane + FrankenPHP management tools
 # =============================================
 
 # Pastikan library ini hanya di-load sekali
@@ -101,159 +101,6 @@ get_absolute_path() {
 # =============================================
 # Validation Functions
 # =============================================
-
-# Validate domain format
-validate_domain() {
-    local domain="$1"
-    local domain_regex="^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$"
-    local ip_regex="^([0-9]{1,3}\.){3}[0-9]{1,3}$"
-    local localhost_regex="^localhost$"
-
-    if [ -z "$domain" ]; then
-        log_error "Domain tidak boleh kosong!"
-        return 1
-    fi
-
-    if [ ${#domain} -gt 253 ]; then
-        log_error "Domain terlalu panjang (maksimal 253 karakter)!"
-        return 1
-    fi
-
-    if [[ "$domain" =~ $localhost_regex ]]; then
-        log_debug "Domain localhost valid"
-        return 0
-    fi
-
-    # Validate IP address
-    if [[ "$domain" =~ ^[0-9.]+$ ]]; then
-        local dot_count=$(echo "$domain" | tr -cd '.' | wc -c)
-        if [ $dot_count -eq 3 ]; then
-            local valid_ip=true
-            IFS='.' read -ra OCTETS <<< "$domain"
-
-            if [ ${#OCTETS[@]} -ne 4 ]; then
-                log_error "IP address $domain tidak valid!"
-                return 1
-            fi
-
-            for octet in "${OCTETS[@]}"; do
-                if [ -z "$octet" ] || ! [[ "$octet" =~ ^[0-9]+$ ]] || [ $octet -gt 255 ]; then
-                    valid_ip=false
-                    break
-                fi
-
-                if [ ${#octet} -gt 1 ] && [ "${octet:0:1}" = "0" ]; then
-                    valid_ip=false
-                    break
-                fi
-            done
-
-            if [ "$valid_ip" = true ]; then
-                log_debug "IP address $domain valid"
-                return 0
-            else
-                log_error "IP address $domain tidak valid!"
-                return 1
-            fi
-        else
-            log_error "IP address $domain tidak valid!"
-            return 1
-        fi
-    fi
-
-    # Validate domain format
-    if [[ "$domain" =~ $domain_regex ]]; then
-        log_debug "Domain $domain valid"
-        return 0
-    else
-        log_error "Format domain $domain tidak valid!"
-        log_error "Contoh format yang valid:"
-        log_error "  - example.com"
-        log_error "  - subdomain.example.com"
-        log_error "  - example.co.id"
-        log_error "  - localhost"
-        log_error "  - 192.168.1.1"
-        return 1
-    fi
-}
-
-# Validate port number
-validate_port() {
-    local port="$1"
-    local check_in_use="${2:-true}"
-
-    if [ -z "$port" ]; then
-        log_error "Port tidak boleh kosong!"
-        return 1
-    fi
-
-    if ! [[ "$port" =~ ^[0-9]+$ ]]; then
-        log_error "Port harus berupa angka!"
-        return 1
-    fi
-
-    if [ $port -lt 1 ] || [ $port -gt 65535 ]; then
-        log_error "Port harus dalam range 1-65535!"
-        return 1
-    fi
-
-    if [ $port -lt 1024 ]; then
-        log_warning "Port $port adalah privileged port (< 1024), memerlukan akses root"
-    fi
-
-    if [ "$check_in_use" = true ]; then
-        if netstat -tuln 2>/dev/null | grep -q ":$port " || ss -tuln 2>/dev/null | grep -q ":$port "; then
-            log_error "Port $port sudah digunakan!"
-            return 1
-        fi
-    fi
-
-    log_debug "Port $port valid dan tersedia"
-    return 0
-}
-
-# Validate app name
-validate_app_name() {
-    local app_name="$1"
-
-    if [ -z "$app_name" ]; then
-        log_error "Nama app tidak boleh kosong!"
-        return 1
-    fi
-
-    if [ ${#app_name} -gt 60 ]; then
-        log_error "Nama app terlalu panjang (maksimal 60 karakter)!"
-        return 1
-    fi
-
-    if ! [[ "$app_name" =~ ^[a-zA-Z][a-zA-Z0-9_]*$ ]]; then
-        log_error "Format nama app '$app_name' tidak valid!"
-        log_error "Nama app harus:"
-        log_error "  - Dimulai dengan huruf"
-        log_error "  - Hanya mengandung huruf, angka, dan underscore"
-        log_error "  - Tidak ada spasi atau karakter spesial"
-        log_error ""
-        log_error "Contoh nama yang valid:"
-        log_error "  - web_sam_l12"
-        log_error "  - websaml12"
-        log_error "  - webSamL12"
-        log_error "  - web_app_sam"
-        return 1
-    fi
-
-    local reserved_words=("mysql" "root" "admin" "test" "information_schema" "performance_schema" "sys")
-    for reserved in "${reserved_words[@]}"; do
-        local app_lower=$(echo "$app_name" | tr '[:upper:]' '[:lower:]')
-        local reserved_lower=$(echo "$reserved" | tr '[:upper:]' '[:lower:]')
-        if [ "$app_lower" = "$reserved_lower" ]; then
-            log_error "Nama app '$app_name' adalah reserved word!"
-            return 1
-        fi
-    done
-
-    log_debug "Nama app '$app_name' valid"
-    return 0
-}
 
 # Check if Laravel app directory is valid
 check_laravel_app() {
@@ -820,7 +667,7 @@ generate_systemd_security() {
 }
 
 # Auto-initialize when sourced (only for root commands)
-if [ "${BASH_SOURCE[0]}" != "${0}" ] && [ "$EUID" -eq 0 ]; then
+if [ "${BASH_SOURCE[0]}" != "${0}" ] && [ "$EUID" -eq 0 ] && [ "${TEST_MODE:-false}" != "true" ]; then
     init_shared_functions
 fi
 

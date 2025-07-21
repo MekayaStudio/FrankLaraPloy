@@ -88,12 +88,6 @@ filter = sshd
 logpath = /var/log/auth.log
 maxretry = 3
 bantime = 7200
-
-[nginx-http-auth]
-enabled = false
-
-[nginx-badbots]
-enabled = false
 EOF
     
     # Enable and start fail2ban
@@ -138,8 +132,6 @@ setup_system_security() {
     log_info "🛡️  Applying system security settings..."
     
     # Disable unnecessary services
-    systemctl disable apache2 2>/dev/null || true
-    systemctl disable nginx 2>/dev/null || true
     systemctl disable php*-fpm 2>/dev/null || true
     
     # Set file permissions

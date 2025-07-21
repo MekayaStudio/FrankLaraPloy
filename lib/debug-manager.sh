@@ -229,11 +229,11 @@ debug_system_overview() {
         log_warning "  ⚠️  MySQL: Not running"
     fi
 
-    # Check Nginx
-    if systemctl is-active --quiet nginx 2>/dev/null; then
-        log_info "  ✅ Nginx: Running"
+    # Check Redis
+    if systemctl is-active --quiet redis 2>/dev/null; then
+        log_info "  ✅ Redis: Running"
     else
-        log_warning "  ⚠️  Nginx: Not running"
+        log_warning "  ⚠️  Redis: Not running"
     fi
 
     # Check FrankenPHP services

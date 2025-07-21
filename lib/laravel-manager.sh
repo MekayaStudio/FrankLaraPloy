@@ -1,8 +1,10 @@
 #!/bin/bash
 
 # =============================================
-# Laravel Manager Library
-# Library untuk manajemen Laravel applications
+# Laravel Manager Library - Core Functions Only
+# Library untuk fungsi-fungsi core Laravel yang tidak tersedia di app-management.sh
+# Fungsi yang tersedia: create_laravel_app, configure_laravel_env, run_laravel_migrations,
+# optimize_laravel_app, setup_laravel_scheduler, setup_laravel_queue_worker, dll.
 # =============================================
 
 # Pastikan library ini hanya di-load sekali
@@ -246,93 +248,6 @@ setup_laravel_queue_worker() {
     log_info "✅ Laravel queue worker configured"
 }
 
-install_app() {
-    local app_name="${1:-}"
-    local domain="${2:-}"
-    local github_repo="${3:-}"
-    
-    # Validate inputs
-    if [ -z "$app_name" ]; then
-        handle_error "App name is required" $ERROR_VALIDATION
-        return 1
-    fi
-    
-    if [ -z "$domain" ]; then
-        handle_error "Domain is required" $ERROR_VALIDATION
-        return 1
-    fi
-    
-    # Validate app name (only alphanumeric and hyphens)
-    if ! [[ "$app_name" =~ ^[a-zA-Z0-9-]+$ ]]; then
-        handle_error "App name must contain only alphanumeric characters and hyphens" $ERROR_VALIDATION
-        return 1
-    fi
-    
-    # Validate domain
-    if ! validate_domain "$domain"; then
-        handle_error "Invalid domain format: $domain" $ERROR_VALIDATION
-        return 1
-    fi
-    
-    # Check if app already exists
-    if [ -d "$APPS_BASE_DIR/$app_name" ]; then
-        handle_error "App '$app_name' already exists" $ERROR_VALIDATION
-        return 1
-    fi
-    
-    log_info "🚀 Installing Laravel app: $app_name on domain: $domain"
-    
-    # Create Laravel app
-    create_laravel_app "$app_name" "$domain" "$github_repo" || return 1
-    
-    # Configure environment
-    configure_laravel_env "$app_name" "$domain" || return 1
-    
-    # Run migrations
-    run_laravel_migrations "$app_name" || return 1
-    
-    # Install and configure Octane
-    if ! octane_install "$APPS_BASE_DIR/$app_name"; then
-        handle_error "Failed to install Laravel Octane" $ERROR_DEPENDENCY
-        return 1
-    fi
-    
-    # Configure Octane service
-    if ! octane_create_service "$app_name"; then
-        handle_error "Failed to create Octane service" $ERROR_SERVICE
-        return 1
-    fi
-    
-    # Setup scheduler and queue worker
-    setup_laravel_scheduler "$app_name" || return 1
-    setup_laravel_queue_worker "$app_name" || return 1
-    
-    # Optimize application
-    optimize_laravel_app "$app_name" || return 1
-    
-    # Start services
-    if ! systemctl start "laravel-octane-${app_name}"; then
-        handle_error "Failed to start Octane service" $ERROR_SERVICE
-        return 1
-    fi
-    
-    if ! systemctl enable "laravel-octane-${app_name}"; then
-        handle_error "Failed to enable Octane service" $ERROR_SERVICE
-        return 1
-    fi
-    
-    log_info "✅ Laravel app '$app_name' installed successfully!"
-    log_info "🌐 Domain: https://$domain"
-    log_info "📁 Path: $APPS_BASE_DIR/$app_name"
-    log_info "🔧 Service: laravel-octane-$app_name"
-    log_info ""
-    log_info "🚀 Next steps:"
-    log_info "   • Point your domain to this server's IP"
-    log_info "   • SSL certificate will be generated automatically"
-    log_info "   • Monitor logs: sudo $0 logs $app_name"
-    log_info "   • Check status: sudo $0 status $app_name"
-}
-
 remove_app() {
     local app_name="${1:-}"
     
@@ -384,108 +299,6 @@ remove_app() {
     log_info "✅ Laravel app '$app_name' removed successfully"
 }
 
-list_apps() {
-    log_info "📋 Installed Laravel applications:"
-    
-    if [ ! -d "$APPS_BASE_DIR" ] || [ -z "$(ls -A "$APPS_BASE_DIR" 2>/dev/null)" ]; then
-        log_info "   No applications installed"
-        return 0
-    fi
-    
-    echo ""
-    printf "%-20s %-10s %-30s %-s\n" "APP NAME" "STATUS" "DOMAIN" "PATH"
-    printf "%-20s %-10s %-30s %-s\n" "--------" "------" "------" "----"
-    
-    for app_dir in "$APPS_BASE_DIR"/*; do
-        if [ -d "$app_dir" ]; then
-            local app_name=$(basename "$app_dir")
-            local status="STOPPED"
-            local domain="N/A"
-            
-            # Check service status
-            if systemctl is-active --quiet "laravel-octane-${app_name}"; then
-                status="RUNNING"
-            fi
-            
-            # Get domain from .env file
-            local env_file="$app_dir/.env"
-            if [ -f "$env_file" ]; then
-                domain=$(grep "APP_URL=" "$env_file" | cut -d'=' -f2 | sed 's/https:\/\///' | sed 's/http:\/\///')
-            fi
-            
-            printf "%-20s %-10s %-30s %-s\n" "$app_name" "$status" "$domain" "$app_dir"
-        fi
-    done
-    echo ""
-}
-
-status_app() {
-    local app_name="${1:-}"
-    
-    if [ -z "$app_name" ]; then
-        handle_error "App name is required" $ERROR_VALIDATION
-        return 1
-    fi
-    
-    local app_dir="$APPS_BASE_DIR/$app_name"
-    
-    if [ ! -d "$app_dir" ]; then
-        handle_error "App '$app_name' not found" $ERROR_VALIDATION
-        return 1
-    fi
-    
-    log_info "📊 Status for Laravel app: $app_name"
-    echo ""
-    
-    # App info
-    local env_file="$app_dir/.env"
-    if [ -f "$env_file" ]; then
-        local domain=$(grep "APP_URL=" "$env_file" | cut -d'=' -f2 | sed 's/https:\/\///' | sed 's/http:\/\///')
-        local app_env=$(grep "APP_ENV=" "$env_file" | cut -d'=' -f2)
-        local app_debug=$(grep "APP_DEBUG=" "$env_file" | cut -d'=' -f2)
-        
-        echo "Domain: $domain"
-        echo "Environment: $app_env"
-        echo "Debug: $app_debug"
-        echo "Path: $app_dir"
-        echo ""
-    fi
-    
-    # Service status
-    echo "Service Status:"
-    if systemctl is-active --quiet "laravel-octane-${app_name}"; then
-        echo "  Octane: RUNNING"
-    else
-        echo "  Octane: STOPPED"
-    fi
-    
-    if systemctl is-active --quiet "laravel-queue-${app_name}"; then
-        echo "  Queue: RUNNING"
-    else
-        echo "  Queue: STOPPED"
-    fi
-    echo ""
-    
-    # Database status
-    echo "Database Status:"
-    if check_app_database "$app_name"; then
-        echo "  Database: CONNECTED"
-    else
-        echo "  Database: ERROR"
-    fi
-    echo ""
-    
-    # Process info
-    echo "Process Information:"
-    local octane_pid=$(systemctl show "laravel-octane-${app_name}" --property=MainPID --value)
-    if [ "$octane_pid" != "0" ]; then
-        echo "  Octane PID: $octane_pid"
-        local memory_usage=$(ps -p "$octane_pid" -o rss= 2>/dev/null | awk '{print $1/1024}')
-        echo "  Memory Usage: ${memory_usage}MB"
-    fi
-    echo ""
-}
-
 logs_app() {
     local app_name="${1:-}"
     local lines="${2:-50}"
@@ -524,16 +337,4 @@ logs_app() {
         journalctl -u "laravel-queue-${app_name}" -n "$lines" --no-pager
         echo ""
     fi
-}
-
-# Helper function to validate domain
-validate_domain() {
-    local domain="$1"
-    
-    # Basic domain validation
-    if [[ ! "$domain" =~ ^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
-        return 1
-    fi
-    
-    return 0
 }

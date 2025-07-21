@@ -21,16 +21,54 @@ install_app() {
     local github_repo="${3:-}"
     local db_name="${4:-${app_name}_db}"
     local octane_mode="${5:-smart}"  # smart, enhanced, or basic
+    local http_mode="${6:-}"         # http-only, https-only, or dual
 
     if [ -z "$app_name" ] || [ -z "$domain" ]; then
-        log_error "Usage: install_app <app-name> <domain> [github-repo] [db-name] [octane-mode]"
+        log_error "Usage: install_app <app-name> <domain> [github-repo] [db-name] [octane-mode] [http-mode]"
         log_error "Octane modes: smart (default), enhanced, basic"
+        log_error "HTTP modes: http-only, https-only, dual"
         return 1
+    fi
+
+    # Interactive HTTP mode selection if not provided
+    if [ -z "$http_mode" ]; then
+        echo ""
+        log_info "🌐 Choose HTTP/HTTPS Mode for $app_name"
+        echo "=================================="
+        echo "1) HTTP-only     - Only HTTP (port 80)"
+        echo "2) HTTPS-only    - Only HTTPS with HTTP redirect (port 443)"
+        echo "3) Dual Mode     - Both HTTP and HTTPS (no redirect)"
+        echo ""
+        while true; do
+            read -p "Select mode [1-3]: " choice
+            case $choice in
+                1)
+                    http_mode="http-only"
+                    log_info "✅ Selected: HTTP-only mode"
+                    break
+                    ;;
+                2)
+                    http_mode="https-only"
+                    log_info "✅ Selected: HTTPS-only mode"
+                    break
+                    ;;
+                3)
+                    http_mode="dual"
+                    log_info "✅ Selected: Dual mode (HTTP + HTTPS)"
+                    break
+                    ;;
+                *)
+                    log_warning "Invalid choice. Please select 1, 2, or 3."
+                    ;;
+            esac
+        done
+        echo ""
     fi
 
     log_info "🚀 Installing Laravel app: $app_name"
     log_info "📝 App: $app_name | Domain: $domain | Repo: ${github_repo:-'Fresh Laravel'}"
     log_info "🔧 Octane mode: $octane_mode"
+    log_info "🌐 HTTP mode: $http_mode"
 
     # Define app directory
     local app_dir="$APPS_BASE_DIR/$app_name"
@@ -58,22 +96,51 @@ install_app() {
             ;;
     esac
 
-    # Step 3: Create systemd service
-    log_info "📋 Step 3: Creating systemd service..."
-    create_octane_service "$app_name" "$app_dir" "$domain"
+    # Step 3: Configure HTTP/HTTPS mode and create systemd services
+    log_info "📋 Step 3: Configuring $http_mode mode and creating systemd services..."
+    case "$http_mode" in
+        "http-only"|"https-only"|"dual")
+            # Configure the selected mode (this will create appropriate services)
+            octane_configure_mode "$app_name" "$http_mode" "$domain"
+            ;;
+        *)
+            log_error "Unknown HTTP mode: $http_mode"
+            return 1
+            ;;
+    esac
 
-    # Step 4: Start the service
-    log_info "📋 Step 4: Starting service..."
-    systemctl enable "octane-$app_name.service"
-    systemctl start "octane-$app_name.service"
+    # Step 4: Start services based on HTTP mode
+    log_info "📋 Step 4: Starting services..."
+    octane_start_dual_mode "$app_name" "$http_mode"
 
     # Save app configuration
     save_app_config "$app_name" "$domain" "$app_dir" "$db_name"
 
     log_info ""
     log_info "🎉 App $app_name installed successfully!"
-    log_info "🌐 Visit: https://$domain"
+    
+    # Display appropriate URL based on mode
+    case "$http_mode" in
+        "http-only")
+            log_info "🌐 Visit: http://$domain"
+            ;;
+        "https-only")
+            log_info "🌐 Visit: https://$domain"
+            log_info "🔒 HTTP requests will be redirected to HTTPS"
+            ;;
+        "dual")
+            log_info "🌐 Visit HTTP: http://$domain"
+            log_info "🌐 Visit HTTPS: https://$domain"
+            log_info "📝 Both HTTP and HTTPS work without redirect"
+            ;;
+    esac
+    
     log_info "📊 Check status: ./install.sh status $app_name"
+    case "$http_mode" in
+        "dual")
+            log_info "📊 Check dual mode status: ./install.sh octane:status-dual $app_name $http_mode"
+            ;;
+    esac
     log_info "🔍 Debug: ./install.sh debug $app_name"
 }
 
@@ -523,80 +590,10 @@ setup_frankenphp_config() {
     
     log_info "📝 Setting up FrankenPHP configuration for $app_name"
     
-    # Create Caddyfile for FrankenPHP
-    create_caddyfile "$app_name" "$domain"
-    
-    # Update .env for FrankenPHP settings
+    # Update .env for FrankenPHP settings  
     update_env_for_frankenphp "$domain"
-}
-
-create_caddyfile() {
-    local app_name="$1"
-    local domain="$2"
     
-    log_info "📝 Creating Caddyfile for $app_name"
-    
-    # Create Caddyfile with proper configuration
-    cat > "Caddyfile" << EOF
-{
-    # Global options
-    auto_https on
-    admin off
-    
-    # Logging
-    log {
-        level INFO
-        output file /var/log/frankenphp/$app_name.log
-    }
-}
-
-# Main site
-$domain {
-    # Document root
-    root * public
-    
-    # Security headers
-    header {
-        -Server
-        X-Content-Type-Options nosniff
-        X-Frame-Options DENY
-        X-XSS-Protection "1; mode=block"
-        Referrer-Policy strict-origin-when-cross-origin
-    }
-    
-    # Enable compression
-    encode gzip
-    
-    # PHP handling
-    php_fastcgi unix//run/php/php8.3-fpm.sock
-    
-    # Laravel-specific rules
-    try_files {path} {path}/ /index.php?{query}
-    
-    # Static assets caching
-    @static {
-        path *.css *.js *.ico *.png *.jpg *.jpeg *.gif *.svg *.woff *.woff2 *.ttf *.otf
-    }
-    header @static Cache-Control "public, max-age=31536000"
-    
-    # Deny sensitive files
-    respond /storage/app/private/* 404
-    respond /.env* 404
-    respond /composer.* 404
-    respond /artisan 404
-}
-
-# Redirect www to non-www
-www.$domain {
-    redir https://$domain{uri} permanent
-}
-EOF
-    
-    # Set proper ownership
-    chown www-data:www-data "Caddyfile"
-    chmod 644 "Caddyfile"
-    
-    log_info "✅ Caddyfile created"
+    log_info "✅ FrankenPHP handles routing and SSL automatically"
 }
 
 update_env_for_frankenphp() {
@@ -1124,11 +1121,11 @@ check_service_issues() {
     # Check for port binding issues
     if journalctl -u "octane-$app_name.service" -n 50 --no-pager | grep -q "bind: permission denied"; then
         log_error "🚫 Port binding issue detected!"
-        log_info "💡 The service is trying to bind to privileged ports (80/443) with user www-data"
+        log_info "💡 The service is trying to bind to privileged ports (80/443)"
         log_info "   Solutions:"
         log_info "   1. Use sudo ./install.sh fix:ports $app_name"
-        log_info "   2. Configure reverse proxy (nginx/apache)"
-        log_info "   3. Use systemd socket activation"
+        log_info "   2. FrankenPHP handles port binding automatically"
+        log_info "   3. Check FrankenPHP configuration"
     fi
     
     # Check for TLS storage issues
@@ -1160,18 +1157,15 @@ fix_permissions() {
     
     log_info "🔧 Fixing permissions for $app_name..."
     
-    # Create necessary directories
-    mkdir -p /var/lib/caddy
+    # Create necessary directories for FrankenPHP
     mkdir -p /var/log/frankenphp
     
     # Set proper ownership
     chown -R www-data:www-data "$app_dir"
-    chown -R www-data:www-data /var/lib/caddy
     chown -R www-data:www-data /var/log/frankenphp
     
     # Set proper permissions
     chmod -R 755 "$app_dir"
-    chmod -R 755 /var/lib/caddy
     chmod -R 755 /var/log/frankenphp
     
     # Fix storage permissions
@@ -1223,82 +1217,7 @@ fix_tls_storage() {
     local app_name="$1"
     
     log_info "🔧 Fixing TLS storage issues for $app_name..."
-    
-    # Create proper TLS storage directories
-    mkdir -p /var/lib/caddy/.local/share/caddy
-    mkdir -p /var/lib/caddy/.local/share/caddy/locks
-    
-    # Set proper ownership
-    chown -R www-data:www-data /var/lib/caddy
-    
-    # Set proper permissions
-    chmod -R 755 /var/lib/caddy
-    
-    # Update service to use proper data directory
-    local service_file="/etc/systemd/system/octane-$app_name.service"
-    if [ -f "$service_file" ]; then
-        # Add environment variable for Caddy data directory
-        if ! grep -q "Environment=XDG_DATA_HOME" "$service_file"; then
-            sed -i '/Environment=APP_DEBUG=false/a Environment=XDG_DATA_HOME=/var/lib/caddy/.local/share' "$service_file"
-        fi
-        
-        # Update ReadWritePaths
-        sed -i 's|ReadWritePaths=/opt/laravel-apps/.*|ReadWritePaths=/opt/laravel-apps/'$app_name' /tmp /var/lib/caddy|' "$service_file"
-    fi
-    
-    systemctl daemon-reload
-    systemctl restart "octane-$app_name.service"
-    
-    log_info "✅ TLS storage fixed"
-}
 
-create_reverse_proxy_config() {
-    local app_name="$1"
-    local domain=$(grep "host=" "/etc/systemd/system/octane-$app_name.service" | sed 's/.*--host=\([^ ]*\).*/\1/')
-    
-    # Create nginx configuration
-    cat > "/etc/nginx/sites-available/$app_name" << EOF
-server {
-    listen 80;
-    server_name $domain;
-    
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-}
-
-server {
-    listen 443 ssl;
-    server_name $domain;
-    
-    ssl_certificate /etc/letsencrypt/live/$domain/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/$domain/privkey.pem;
-    
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-}
-EOF
-    
-    # Enable the site
-    ln -sf "/etc/nginx/sites-available/$app_name" "/etc/nginx/sites-enabled/$app_name"
-    
-    # Test nginx configuration
-    if nginx -t; then
-        systemctl reload nginx
-        log_info "✅ Nginx reverse proxy configured"
-    else
-        log_error "❌ Nginx configuration test failed"
-    fi
-}
 
 update_service_ports() {
     local app_name="$1"
@@ -1756,4 +1675,5 @@ show_multi_app_resource_usage() {
     if [ $memory_usage_percent -gt 80 ]; then
         log_warning "⚠️  WARNING: High memory usage detected!"
     fi
+}
 }

@@ -6,11 +6,11 @@ Sistem deployment multi-aplikasi Laravel yang menggunakan FrankenPHP dengan duku
 
 ### 🔥 Laravel Octane + FrankenPHP
 - **Embedded PHP Server**: Tidak memerlukan PHP-FPM
-- **Built-in Caddy Web Server**: Reverse proxy otomatis
-- **Auto HTTPS**: Let's Encrypt terintegrasi
+- **Built-in Web Server**: FrankenPHP dengan Caddy terintegrasi
+- **Auto HTTPS**: Let's Encrypt terintegrasi otomatis
 - **🌐 HTTP/HTTPS Dual Mode**: Support HTTP dan HTTPS tanpa redirect
 - **Worker Optimization**: Kalkulasi thread optimal berdasarkan CPU/Memory
-- **Apache/Nginx Removal**: Otomatis menghapus Apache/Nginx untuk mencegah konflik
+- **Pure Laravel Ecosystem**: Fokus eksklusif pada Laravel Octane + FrankenPHP
 - **Indonesia Mirror**: Menggunakan mirror server Indonesia untuk download lebih cepat
 
 ### 📈 Horizontal Scaling
@@ -243,30 +243,6 @@ export SKIP_PREFLIGHT_CHECKS=true
 ./install.sh install test_app localhost
 ```
 
-### Manual FrankenPHP Configuration
-
-```bash
-# Custom Caddyfile untuk load balancing
-cat > /opt/laravel-apps/web_sam/Caddyfile <<EOF
-{
-    frankenphp {
-        num_threads 8
-    }
-}
-
-example.com {
-    reverse_proxy {
-        to localhost:8000
-        to localhost:8001
-        to localhost:8002
-        lb_policy round_robin
-        health_uri /health
-        health_interval 30s
-    }
-}
-EOF
-```
-
 ### Database Management
 
 ```bash
@@ -305,24 +281,7 @@ SYSTEMD_PROTECT_HOME=false
 SYSTEMD_NO_NEW_PRIVILEGES=false
 ```
 
-### 2. Apache/Nginx Removal
-
-Script otomatis menghapus Apache dan Nginx untuk mencegah konflik dengan FrankenPHP:
-
-```bash
-# Apache dan Nginx dihapus otomatis saat setup
-# Termasuk:
-# - apache2, apache2-bin, apache2-common, apache2-data, apache2-utils
-# - nginx, nginx-common, nginx-core
-# - libapache2-mod-php*
-# - /etc/apache2, /etc/nginx, /var/www/html
-
-# Cek apakah Apache/Nginx sudah dihapus
-systemctl status apache2  # Should show "not found"
-systemctl status nginx    # Should show "not found"
-```
-
-### 3. Indonesia Mirror Configuration
+### 2. Indonesia Mirror Configuration
 
 Script menggunakan mirror server Indonesia untuk download lebih cepat:
 
@@ -336,7 +295,7 @@ Script menggunakan mirror server Indonesia untuk download lebih cepat:
 # /etc/apt/sources.list.backup
 ```
 
-### 4. Firewall Configuration
+### 3. Firewall Configuration
 
 ```bash
 # Firewall sudah dikonfigurasi otomatis

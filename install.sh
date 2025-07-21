@@ -27,8 +27,8 @@ source "$SCRIPT_DIR/lib/validation.sh"
 # Load system setup module
 source "$SCRIPT_DIR/lib/system-setup.sh"
 
-# Load Laravel manager
-source "$SCRIPT_DIR/lib/laravel-manager.sh"
+# Load app management (includes Laravel and Octane management)
+source "$SCRIPT_DIR/lib/app-management.sh"
 
 # Load Octane manager
 source "$SCRIPT_DIR/lib/octane-manager.sh"
@@ -45,9 +45,6 @@ source "$SCRIPT_DIR/lib/security.sh"
 # Load database manager
 source "$SCRIPT_DIR/lib/database-manager.sh"
 
-# Load app management
-source "$SCRIPT_DIR/lib/app-management.sh"
-
 # Load debug manager
 source "$SCRIPT_DIR/lib/debug-manager.sh"
 
@@ -62,8 +59,15 @@ source "$SCRIPT_DIR/lib/connection-manager.sh"
 PHP_VERSION="8.3"
 NODE_VERSION="18"
 
-# Setup error handling
-setup_error_handling
+# Load error handler if not in test mode
+if [ "${TEST_MODE:-false}" != "true" ]; then
+    # Setup error handling
+    setup_error_handling() {
+        set -euo pipefail
+        trap 'echo "Error occurred at line $LINENO. Exit code: $?" >&2' ERR
+    }
+    setup_error_handling
+fi
 
 # =============================================
 # Help Functions
@@ -82,7 +86,7 @@ COMMANDS:
     setup                           Setup system with FrankenPHP + Laravel Octane
     
     App Management:
-    install <app> <domain> [repo]   Install new Laravel app
+    install <app> <domain> [repo] [db-name] [octane-mode] [http-mode]  Install new Laravel app
     remove <app>                    Remove Laravel app
     list                           List all installed apps
     resources                      Show multi-app resource usage
@@ -117,15 +121,22 @@ COMMANDS:
     octane:status-dual <app> [mode] Show dual mode status
     octane:restart-dual <app> [mode] Restart dual mode services
 
+    SSL Management (FrankenPHP Automatic):
+    ssl:status <app>               Show SSL status (automatic via FrankenPHP)
+    ssl:info                       Show SSL information
+
 EXAMPLES:
     # Setup system
     sudo ./install.sh setup
     
-    # Install new Laravel app
+    # Install new Laravel app (with interactive mode selection)
     sudo ./install.sh install myapp example.com
     
-    # Install from GitHub
-    sudo ./install.sh install myapp example.com https://github.com/user/repo.git
+    # Install with specific mode (skip interactive selection)
+    sudo ./install.sh install myapp example.com "" "" smart dual
+    
+    # Install from GitHub with HTTPS-only mode
+    sudo ./install.sh install myapp example.com https://github.com/user/repo.git myapp_db smart https-only
     
     # Check app status
     sudo ./install.sh status myapp
@@ -139,17 +150,23 @@ EXAMPLES:
     # Check dual mode status
     sudo ./install.sh octane:status-dual myapp dual
 
+HTTP/HTTPS MODES:
+    http-only    - Only HTTP (port 80) - ideal for development
+    https-only   - Only HTTPS with HTTP redirect (port 443) - production with security
+    dual         - Both HTTP and HTTPS (no redirect) - maximum compatibility
+
 FEATURES:
-    ✅ Laravel Octane with FrankenPHP (no nginx/apache needed)
-    ✅ Automatic HTTPS with Let's Encrypt
-    ✅ HTTP/HTTPS dual mode support (no redirect)
-    ✅ Built-in PHP runtime (no PHP-FPM)
+    ✅ Laravel Octane with FrankenPHP (embedded web server)
+    ✅ Automatic HTTPS with Let's Encrypt (built-in)
+    ✅ HTTP/HTTPS dual mode support 
+    ✅ Built-in PHP runtime (no PHP-FPM needed)
     ✅ HTTP/2 and HTTP/3 support
     ✅ Automatic database setup
     ✅ Systemd service management
     ✅ Queue worker management
     ✅ Scheduler setup
     ✅ Production optimization
+    ✅ Zero-config SSL certificates
 
 EOF
 }
@@ -328,6 +345,15 @@ main() {
                 log_error "Usage: octane:restart-dual <app-name> [mode]"
                 exit 1
             fi
+            ;;
+            
+        # SSL commands (FrankenPHP automatic)
+        "ssl:status")
+            shift
+            ssl_status "$1"
+            ;;
+        "ssl:info")
+            ssl_info
             ;;
             
         *)

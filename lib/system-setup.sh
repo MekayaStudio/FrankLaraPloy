@@ -184,19 +184,7 @@ configure_php_for_octane() {
         sed -i 's/;opcache.fast_shutdown = .*/opcache.fast_shutdown = 1/' "$php_ini"
     fi
     
-    # Configure PHP-FPM as backup
-    if [ -f "$fpm_ini" ]; then
-        sed -i 's/memory_limit = .*/memory_limit = 512M/' "$fpm_ini"
-        sed -i 's/max_execution_time = .*/max_execution_time = 300/' "$fpm_ini"
-        sed -i 's/post_max_size = .*/post_max_size = 100M/' "$fpm_ini"
-        sed -i 's/upload_max_filesize = .*/upload_max_filesize = 100M/' "$fpm_ini"
-        sed -i 's/;opcache.enable = .*/opcache.enable = 1/' "$fpm_ini"
-        sed -i 's/;opcache.memory_consumption = .*/opcache.memory_consumption = 128/' "$fpm_ini"
-        sed -i 's/;opcache.interned_strings_buffer = .*/opcache.interned_strings_buffer = 8/' "$fpm_ini"
-        sed -i 's/;opcache.max_accelerated_files = .*/opcache.max_accelerated_files = 4000/' "$fpm_ini"
-        sed -i 's/;opcache.revalidate_freq = .*/opcache.revalidate_freq = 2/' "$fpm_ini"
-        sed -i 's/;opcache.fast_shutdown = .*/opcache.fast_shutdown = 1/' "$fpm_ini"
-    fi
+    log_info "✅ PHP ${PHP_VERSION} configured for Laravel Octane + FrankenPHP"
     
     log_info "✅ PHP configured for Laravel Octane"
 }
